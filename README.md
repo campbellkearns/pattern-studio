@@ -1,5 +1,7 @@
 # Pattern Studio
 
+[![Deploy to GitHub Pages](https://github.com/campbellkearns/pattern-studio/actions/workflows/deploy.yml/badge.svg)](https://github.com/campbellkearns/pattern-studio/actions/workflows/deploy.yml)
+
 > 'Pattern Studio' is a working name — the app will be renamed before release.
 
 A browser studio for learning to sew: flat pattern pieces become orbitable 3D
@@ -12,6 +14,12 @@ the source of truth for both 2D SVG output and the 3D scene.
 
 The repo is in early scaffold; the placeholder page served by `npm run dev`
 will be replaced by the 3D viewport in the first rendering milestone.
+
+## Live demo
+
+The production build is deployed to GitHub Pages on every merge to `main`:
+
+**https://campbellkearns.github.io/pattern-studio/**
 
 ## Development
 
@@ -29,3 +37,6 @@ npm run build     # type-check (tsc --noEmit) + production build
 CircleCI runs lint and tests on every branch and PR (`.circleci/config.yml`):
 `npm ci` → eslint → vitest on a small executor. One-time setup: the repo owner
 must follow this repository in their CircleCI org before the pipeline triggers.
+
+Merges to `main` additionally deploy the production build to GitHub Pages via
+`.github/workflows/deploy.yml` (Pages source: GitHub Actions).
