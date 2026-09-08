@@ -15,7 +15,14 @@ import {
   saveProject,
   serializeProject,
 } from './io/projectIo';
+import { copyTextToClipboard } from './io/clipboardIo';
 import { downloadTextFile, pickJsonText } from './io/fileIo';
+import {
+  MAX_SHARE_URL_LENGTH,
+  decodeProjectToken,
+  planShare,
+  readShareToken,
+} from './io/shareLink';
 import { createPiecePanel } from './view/panel';
 import { supportsWebGL2 } from './view/webgl';
 import { createSelectionStore } from './view/selection';
@@ -60,6 +67,54 @@ function slugify(name: string): string {
   return slug.length > 0 ? slug : 'pattern';
 }
 
+/**
+ * Cold-start project: a shared link wins (the hash is consumed after load so
+ * a plain reload doesn't replay the link over later saves), then the project
+ * saved in this browser, then the starter. Anything invalid is narrated, not
+ * dropped — a broken link or corrupted save must say so.
+ */
+function loadStartupProject(): { project: Project; message: string } {
+  const starter = createStarterProject(NOTEBOOK_HOLDER_STARTER);
+
+  const token = readShareToken(window.location.hash);
+  if (token !== null) {
+    const parsed = decodeProjectToken(token);
+    if (parsed.status === 'ok') {
+      history.replaceState(
+        null,
+        '',
+        window.location.pathname + window.location.search,
+      );
+      return {
+        project: parsed.project,
+        message: `Loaded '${parsed.project.name}' from the shared link.`,
+      };
+    }
+    return {
+      project: starter,
+      message: `The shared link held an invalid project (${parsed.reason}) — showing the starter instead.`,
+    };
+  }
+
+  const saved = loadProject(window.localStorage);
+  if (saved.status === 'found') {
+    return {
+      project: saved.project,
+      message: `Restored '${saved.project.name}' from this browser.`,
+    };
+  }
+  if (saved.status === 'invalid') {
+    return {
+      project: starter,
+      message: `Saved project was invalid (${saved.reason}) — showing the starter.`,
+    };
+  }
+  return {
+    project: starter,
+    message: `Showing the starter: '${starter.name}'.`,
+  };
+}
+
 export function mountApp(root: HTMLElement): void {
   root.innerHTML = '';
 
@@ -67,8 +122,6 @@ export function mountApp(root: HTMLElement): void {
     renderUnsupported(root);
     return;
   }
-
-  const starter = createStarterProject(NOTEBOOK_HOLDER_STARTER);
 
   // --- Static chrome ------------------------------------------------------
   const shell = document.createElement('div');
@@ -104,8 +157,9 @@ export function mountApp(root: HTMLElement): void {
   root.append(shell, status);
 
   // --- Live project + view lifecycle --------------------------------------
+  const startup = loadStartupProject();
   const selection = createSelectionStore();
-  let currentProject: Project = starter;
+  let currentProject: Project = startup.project;
   let viewport: Viewport | null = null;
   let panelHandle: { dispose(): void } | null = null;
   let unsubscribe: (() => void) | null = null;
@@ -163,7 +217,8 @@ export function mountApp(root: HTMLElement): void {
     status.textContent = message;
   };
 
-  mountProject(starter);
+  mountProject(startup.project);
+  narrate(startup.message);
 
   // --- Toolbar (F7: projects as data) -------------------------------------
   const addButton = (label: string, onClick: () => void): void => {
@@ -194,6 +249,31 @@ export function mountApp(root: HTMLElement): void {
     } else {
       narrate(`Saved project is invalid: ${saved.reason}`);
     }
+  });
+
+  addButton('Share', () => {
+    const plan = planShare(
+      currentProject,
+      window.location.origin + window.location.pathname,
+    );
+    void (async () => {
+      if (plan.kind === 'url') {
+        const copied = await copyTextToClipboard(plan.url);
+        narrate(
+          copied
+            ? `Share link copied (${plan.urlLength} characters) — opening it loads '${currentProject.name}'.`
+            : 'Could not reach the clipboard — use Export JSON to share this project instead.',
+        );
+        return;
+      }
+      // Share-mode failure state: URL over the length limit → clipboard JSON.
+      const copied = await copyTextToClipboard(plan.json);
+      narrate(
+        copied
+          ? `Too large for a link (${plan.urlLength} characters, limit ${MAX_SHARE_URL_LENGTH}) — the project JSON was copied instead. Send it to Import JSON.`
+          : `Too large for a link (${plan.urlLength} characters) and the clipboard is unavailable — use Export JSON instead.`,
+      );
+    })();
   });
 
   addButton('Export JSON', () => {
