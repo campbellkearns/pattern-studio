@@ -17,8 +17,21 @@
  * by tests at the template so an adapter upgrade that changes the topology
  * fails loudly instead of mis-seaming.
  */
-import type { EdgeChain, PathCmd, Piece } from '../model';
-import { closePath, lineTo, moveTo, quadTo } from '../model';
+import type {
+  EdgeChain,
+  PathCmd,
+  Piece,
+  SeamStep,
+  StarterProject,
+} from '../model';
+import {
+  closePath,
+  createSeamStep,
+  createStarterProject,
+  lineTo,
+  moveTo,
+  quadTo,
+} from '../model';
 import { vec2 } from '../model';
 import type { PantMeasurements } from '../engine/titanSettings';
 import { TITAN_PANTS_TEMPLATE, forkDepthCm } from '../engine/titanSettings';
@@ -63,6 +76,13 @@ export const BACK_CHAINS = {
   /** Centre-back waist corner around the seat down to the fork. */
   rise: { pieceId: BACK_ID, startVertex: 4, edgeCount: 2 },
 } satisfies Record<string, EdgeChain>;
+
+/** The fly shield's attach edge: its long top edge (sized to the front's fly edge). */
+const SHIELD_ATTACH_CHAIN = {
+  pieceId: 'fly-shield',
+  startVertex: 0,
+  edgeCount: 1,
+} satisfies EdgeChain;
 
 /** Seam allowance recorded on hand-authored aux pieces (notebook-holder convention). */
 const AUX_SEAM_ALLOWANCE = 1.5;
@@ -254,4 +274,132 @@ export function outlineHeightCm(outline: readonly PathCmd[]): number {
     }
   }
   return Math.max(...ys) - Math.min(...ys);
+}
+
+/**
+ * Named edges of the waistband outline (bottom edge split at the quarter
+ * points; the centre back sits at the midpoint, where quarters 1 and 2 meet).
+ */
+export const WAISTBAND_CHAINS = {
+  /** Bottom-left quarter — the front's waist joins here. */
+  front: {
+    pieceId: 'waistband',
+    startVertex: 0,
+    edgeCount: 1,
+  } satisfies EdgeChain,
+  /** Second quarter — the back's waist joins here. */
+  back: {
+    pieceId: 'waistband',
+    startVertex: 1,
+    edgeCount: 1,
+  } satisfies EdgeChain,
+};
+
+/**
+ * The starter's ordered seams, in sewing order: fly first (it is built on
+ * the front before any joins), then the rise, the long seams with the
+ * pocket bags caught in the outseam, and the waistband last so the notches
+ * line up. The pocket bag has no step of its own — it is caught in the
+ * outseam; EdgeChain granularity is whole outline edges, and the block
+ * drafts no separate pocket-mouth edge to reference.
+ */
+export const PANTS_SEAM_STEPS: readonly SeamStep[] = [
+  createSeamStep({
+    pieces: ['fly-shield', FRONT_ID],
+    edges: [SHIELD_ATTACH_CHAIN, FRONT_CHAINS.flyExtension],
+    order: 1,
+    note:
+      'Baste the fly shield behind the front’s fly extension first — it backs ' +
+      'the buttonhole placket and keeps the fly from gaping.',
+  }),
+  createSeamStep({
+    pieces: [FRONT_ID, BACK_ID],
+    edges: [FRONT_CHAINS.rise, BACK_CHAINS.rise],
+    order: 2,
+    note:
+      'Stay-stitch both crotch curves before joining — this rise seam sets the ' +
+      'fit, and a stretched curve here is the most common beginner fault. Ease ' +
+      'the front gently around the seat rather than stretching it flat.',
+  }),
+  createSeamStep({
+    pieces: [FRONT_ID, BACK_ID],
+    edges: [FRONT_CHAINS.outseam, BACK_CHAINS.outseam],
+    order: 3,
+    note:
+      'Sew the side seams next and the legs become tubes. The pocket bags are ' +
+      'caught in this seam — their notches mark where the mouth opens.',
+  }),
+  createSeamStep({
+    pieces: [FRONT_ID, BACK_ID],
+    edges: [FRONT_CHAINS.inseam, BACK_CHAINS.inseam],
+    order: 4,
+    note:
+      'The inseam curves around the inner leg; ease it to the back piece ' +
+      'rather than stretching it flat.',
+  }),
+  createSeamStep({
+    pieces: [FRONT_ID, 'waistband'],
+    edges: [FRONT_CHAINS.waist, WAISTBAND_CHAINS.front],
+    order: 5,
+    note:
+      'Right sides together along the front waist. The band’s grainline runs ' +
+      'parallel to the waist so it stays firm and the notches meet.',
+  }),
+  createSeamStep({
+    pieces: [BACK_ID, 'waistband'],
+    edges: [BACK_CHAINS.waist, WAISTBAND_CHAINS.back],
+    order: 6,
+    note:
+      'Join the back half the same way — centre the band’s centre-back notch ' +
+      'at the centre back before stitching.',
+  }),
+];
+
+export const PANTS_LEARN_CARD =
+  "What you'll learn: pants put curves and fit stakes on everything the notebook " +
+  'holder taught. Every piece carries a grainline — match it to the selvedge ' +
+  'before cutting. You’ll stay-stitch the crotch curves so they hold their shape, ' +
+  'ease the seat seam, catch the pocket bags in the side seams, and finish with ' +
+  'the waistband so the notches line up. Fit the rise first, then close the long ' +
+  'seams — the build order is the lesson.';
+
+/** Indigo twill — the classic first-trousers fabric. */
+const PANTS_FABRIC = {
+  weave: 'twill',
+  weaveScale: 0.12,
+  color: '#3e5175',
+  weight: 400,
+} as const;
+
+let cachedStarter: StarterProject | null = null;
+
+/**
+ * The pants starter, validated through createStarterProject (which
+ * re-validates pieces, seam-chain bounds, and order monotonicity). Drafted
+ * lazily and cached: the Titan draft costs ~40 ms and several test files
+ * import this module.
+ */
+export function pantsStarter(): StarterProject {
+  if (cachedStarter === null) {
+    const m = TITAN_PANTS_TEMPLATE;
+    cachedStarter = createStarterProject({
+      id: 'starter-pants',
+      name: 'Pants',
+      measurements: {
+        waist: m.waistCm,
+        hip: m.hipCm,
+        inseam: m.inseamCm,
+        rise: m.risePct,
+        seatEase: m.easePct,
+        waistEase: m.waistEasePct,
+        kneeEase: m.kneeEasePct,
+        crotchDrop: m.crotchDropPct,
+      },
+      fabric: PANTS_FABRIC,
+      pieces: redraftPantsStarter(m),
+      assembly: PANTS_SEAM_STEPS,
+      learnCard: PANTS_LEARN_CARD,
+    });
+  }
+  return cachedStarter;
 }

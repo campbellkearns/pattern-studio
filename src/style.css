@@ -93,6 +93,24 @@ body {
   border-color: var(--accent);
 }
 
+/* Starter picker: same visual language as the toolbar buttons. */
+.starter-picker {
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.starter-picker:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
 /* --- Viewport ---------------------------------------------------------- */
 
 .viewport-holder {

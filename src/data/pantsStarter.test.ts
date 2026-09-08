@@ -12,8 +12,11 @@ import {
   LEG_VERTEX_COUNT,
   outlineHeightCm,
   pantsAuxPieces,
+  pantsStarter,
   redraftPantsStarter,
+  WAISTBAND_CHAINS,
 } from './pantsStarter';
+import { STARTERS, starterById } from './starters';
 import { chainLength, outlineVertices } from './pantsGeometry';
 
 function legOf(pieces: readonly Piece[], id: string): Piece {
@@ -201,5 +204,118 @@ describe('live redraft across the panel ranges', () => {
     expect(outlineHeightCm(after.outline)).toBeLessThan(
       outlineHeightCm(before.outline) - 5,
     );
+  });
+});
+
+describe('pants assembly (ordered seam steps)', () => {
+  const starter = pantsStarter();
+
+  it('validates as a starter project: pieces, chain bounds, order monotonicity', () => {
+    // createStarterProject re-validates everything; a bad reference throws.
+    expect(() => pantsStarter()).not.toThrow();
+    expect(starter.id).toBe('starter-pants');
+  });
+
+  it('carries 5 pieces with blueprint cut counts (within the 5–7 cap)', () => {
+    expect(starter.pieces).toHaveLength(5);
+    const cuts = Object.fromEntries(
+      starter.pieces.map((p) => [p.id, p.cutCount]),
+    );
+    expect(cuts).toEqual({
+      'pants-front': 2,
+      'pants-back': 2,
+      waistband: 1,
+      'fly-shield': 1,
+      'pocket-bag': 2,
+    });
+  });
+
+  it('numbers 6 ordered steps 1…6, each referencing existing pieces', () => {
+    expect(starter.assembly.map((step) => step.order)).toEqual([
+      1, 2, 3, 4, 5, 6,
+    ]);
+    for (const step of starter.assembly) {
+      expect(step.note.length).toBeGreaterThan(20);
+      for (const pieceId of step.pieces) {
+        expect(starter.pieces.some((p) => p.id === pieceId)).toBe(true);
+      }
+    }
+  });
+
+  it('matches every seam-step chain pair within a sewable tolerance', () => {
+    const pieceOf = (id: string): Piece => {
+      const piece = starter.pieces.find((p) => p.id === id);
+      if (!piece) throw new Error(`missing piece "${id}"`);
+      return piece;
+    };
+    // Per-step tolerance: straight seams are near-exact; the eased rise and
+    // the fly edge get generous bounds so a wrong-edge slip still fails.
+    const toleranceFor = (a: string, b: string): number => {
+      if (a === 'fly-shield' || b === 'fly-shield') return 0.2;
+      if (a === 'waistband' || b === 'waistband') return 0.15;
+      return 0.35; // rise seam; the outseam/inseam measure ~0.1% apart
+    };
+    for (const step of starter.assembly) {
+      const lengthA = chainLength(
+        pieceOf(step.edges[0].pieceId).outline,
+        step.edges[0],
+      );
+      const lengthB = chainLength(
+        pieceOf(step.edges[1].pieceId).outline,
+        step.edges[1],
+      );
+      expect(lengthGap(lengthA, lengthB)).toBeLessThan(
+        toleranceFor(step.pieces[0], step.pieces[1]),
+      );
+    }
+  });
+
+  it('pairs a waistband quarter with the front waist edge within 5%', () => {
+    const bandQuarter = chainLength(
+      starter.pieces.find((p) => p.id === 'waistband')!.outline,
+      WAISTBAND_CHAINS.front,
+    );
+    const frontWaist = chainLength(
+      legOf(LEGS, 'pants-front').outline,
+      FRONT_CHAINS.waist,
+    );
+    expect(lengthGap(bandQuarter, frontWaist)).toBeLessThan(0.05);
+  });
+
+  it('ships a learn card that names the lesson concepts', () => {
+    expect(starter.learnCard).toMatch(/What you'll learn:/);
+    expect(starter.learnCard).toMatch(/grainline/);
+    expect(starter.learnCard).toMatch(/stay-stitch/i);
+  });
+
+  it('uses the pants fabric: indigo twill at real gsm', () => {
+    expect(starter.fabric.weave).toBe('twill');
+    expect(starter.fabric.weight).toBeGreaterThan(300);
+  });
+});
+
+describe('starter registry', () => {
+  it('offers the notebook holder and the pants starter in ladder order', () => {
+    expect(STARTERS.map((entry) => entry.id)).toEqual([
+      'starter-notebook-holder',
+      'starter-pants',
+    ]);
+  });
+
+  it('builds validated instances and redrafts full piece sets', () => {
+    for (const entry of STARTERS) {
+      const built = entry.build();
+      expect(built.id).toBe(entry.id);
+      expect(built.assembly).toBeDefined();
+      const redrafted = entry.redraft(TITAN_PANTS_TEMPLATE);
+      expect(redrafted.length).toBeGreaterThanOrEqual(2);
+      for (const piece of redrafted) {
+        expect(piece.grainline).toBeDefined();
+      }
+    }
+  });
+
+  it('returns undefined for unknown ids so custom projects stay custom', () => {
+    expect(starterById('proj-custom-123')).toBeUndefined();
   });
 });
