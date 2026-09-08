@@ -57,6 +57,54 @@ export function pieceOutlineGeometry(piece: Piece): ShapeGeometry {
   return new ShapeGeometry(shapeFromPathCmds(piece.outline));
 }
 
+/**
+ * Grainline lock: rotate the outline's planar UVs by −grainline-angle
+ * around their bbox centre. ShapeGeometry UVs are the shape's own
+ * piece-local coordinates (1 uv unit = 1 cm), and the weave texture's
+ * warp runs along +u — so rotating the UVs by −θ puts the warp, and any
+ * stripes woven into it, at θ° counterclockwise from +x: exactly the
+ * grainline direction (Piece.grainline.angle). Rotating UVs rather than
+ * the texture matrix lets every piece share one texture set while each
+ * still runs the weave true to its own grain. The bbox centre only sets
+ * the phase (pattern offset), which is invisible on a repeating texture.
+ */
+export function applyGrainlineUVs(
+  geometry: BufferGeometry,
+  piece: Piece,
+): void {
+  const uv = geometry.getAttribute('uv');
+  if (!uv) {
+    throw new Error(
+      `piece "${piece.name}" outline geometry has no uv attribute to lock`,
+    );
+  }
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (let i = 0; i < uv.count; i++) {
+    const x = uv.getX(i);
+    const y = uv.getY(i);
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+  }
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+
+  const rad = (-piece.grainline.angle * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  for (let i = 0; i < uv.count; i++) {
+    const dx = uv.getX(i) - cx;
+    const dy = uv.getY(i) - cy;
+    uv.setXY(i, cx + dx * cos - dy * sin, cy + dx * sin + dy * cos);
+  }
+  uv.needsUpdate = true;
+}
+
 export interface Extents {
   readonly width: number;
   readonly height: number;

@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { cubicTo, lineTo, moveTo, quadTo } from '../model';
 import { closePath } from '../model';
 import { vec2 } from '../model';
+import type { Piece } from '../model';
 import {
+  applyGrainlineUVs,
   marksGeometry,
   pieceExtents,
+  pieceOutlineGeometry,
   shapeFromPathCmds,
 } from './pieceGeometry';
 
@@ -113,5 +116,106 @@ describe('marksGeometry', () => {
     ]);
     // 1 start point + 12 samples = 13 points → 12 segments → 24 vertices.
     expect(geometry.getAttribute('position').count).toBe(24);
+  });
+});
+
+describe('applyGrainlineUVs', () => {
+  function rectPiece(angle: number): Piece {
+    return {
+      id: 'r',
+      name: 'Rect',
+      outline: rectPath(40, 28),
+      internal: [],
+      grainline: { angle, placement: vec2(0, 0) },
+      seamAllowance: 0,
+      cutCount: 1,
+    };
+  }
+
+  it('leaves UVs untouched at grainline angle 0', () => {
+    const piece = rectPiece(0);
+    const geometry = pieceOutlineGeometry(piece);
+    const before = geometry.getAttribute('uv').clone();
+    applyGrainlineUVs(geometry, piece);
+    const uv = geometry.getAttribute('uv');
+    for (let i = 0; i < uv.count; i++) {
+      expect(uv.getX(i)).toBeCloseTo(before.getX(i), 9);
+      expect(uv.getY(i)).toBeCloseTo(before.getY(i), 9);
+    }
+  });
+
+  it('rotates UVs by −grainline angle: exact 90° mapping', () => {
+    const piece = rectPiece(90);
+    const geometry = pieceOutlineGeometry(piece);
+    // ShapeGeometry UVs are the shape coordinates themselves (cm).
+    const uv0 = geometry.getAttribute('uv').clone();
+    applyGrainlineUVs(geometry, piece);
+    const uv = geometry.getAttribute('uv');
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (let i = 0; i < uv0.count; i++) {
+      minX = Math.min(minX, uv0.getX(i));
+      minY = Math.min(minY, uv0.getY(i));
+      maxX = Math.max(maxX, uv0.getX(i));
+      maxY = Math.max(maxY, uv0.getY(i));
+    }
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+
+    for (let i = 0; i < uv.count; i++) {
+      // R(−90°)(d) = (dy, −dx): warp axis lands on the +y grain.
+      expect(uv.getX(i)).toBeCloseTo(cx + (uv0.getY(i) - cy), 9);
+      expect(uv.getY(i)).toBeCloseTo(cy - (uv0.getX(i) - cx), 9);
+    }
+  });
+
+  it('is a sign-correct rotation for an off-axis grain (37°)', () => {
+    const theta = 37;
+    const piece = rectPiece(theta);
+    const geometry = pieceOutlineGeometry(piece);
+    const uv0 = geometry.getAttribute('uv').clone();
+    applyGrainlineUVs(geometry, piece);
+    const uv = geometry.getAttribute('uv');
+    const pos = geometry.getAttribute('position');
+
+    // uv bbox centre (the rotation centre).
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (let i = 0; i < uv0.count; i++) {
+      minX = Math.min(minX, uv0.getX(i));
+      minY = Math.min(minY, uv0.getY(i));
+      maxX = Math.max(maxX, uv0.getX(i));
+      maxY = Math.max(maxY, uv0.getY(i));
+    }
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+
+    // Semantic property of the lock: piece point p samples the texture at
+    // uv' = R(−θ)(p − c) + c, so a texture-space step along +u (the warp /
+    // stripe direction) lands in piece space at θ° CCW from +x — the
+    // grainline. Rotating each uv' back by +θ must recover the position:
+    // pos − c = R(θ)·(uv' − c).
+    const rad = (theta * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    for (let i = 0; i < uv.count; i++) {
+      const ux = uv.getX(i) - cx;
+      const uy = uv.getY(i) - cy;
+      // UVs are Float32, so the round-trip carries ~1e-7 cm of noise.
+      expect(pos.getX(i)).toBeCloseTo(cx + ux * cos - uy * sin, 4);
+      expect(pos.getY(i)).toBeCloseTo(cy + ux * sin + uy * cos, 4);
+    }
+  });
+
+  it('throws on geometry without a uv attribute', () => {
+    const piece = rectPiece(0);
+    const geometry = pieceOutlineGeometry(piece);
+    geometry.deleteAttribute('uv');
+    expect(() => applyGrainlineUVs(geometry, piece)).toThrow(/no uv attribute/);
   });
 });

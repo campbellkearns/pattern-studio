@@ -18,6 +18,7 @@ import {
   LineBasicMaterial,
   LineSegments,
   Mesh,
+  MeshPhysicalMaterial,
   MeshStandardMaterial,
   PCFSoftShadowMap,
   PerspectiveCamera,
@@ -29,11 +30,13 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three';
-import type { Project } from '../model';
+import type { FabricSpec, Project } from '../model';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { createFabricTextures, roughnessFor } from './fabricTexture';
 import { layoutOnMat, placementToWorld } from './layout';
 import { createMatTexture, MAT_TILE_CM } from './matTexture';
 import {
+  applyGrainlineUVs,
   marksGeometry,
   pieceExtents,
   pieceOutlineGeometry,
@@ -53,6 +56,8 @@ export interface ViewportOptions {
 
 export interface Viewport {
   applyPreset(preset: CameraPreset): void;
+  /** Re-skin every piece with a new fabric spec, live. */
+  applyFabric(spec: FabricSpec): void;
   /** Dev/dogfood aid: each piece's centre in client coordinates. */
   pieceScreenPositions(): Array<{ id: string; x: number; y: number }>;
   dispose(): void;
@@ -75,7 +80,7 @@ interface PieceView {
   id: string;
   group: Group;
   mesh: Mesh;
-  material: MeshStandardMaterial;
+  material: MeshPhysicalMaterial;
   highlight: LineSegments;
 }
 
@@ -142,18 +147,37 @@ export function createViewport(options: ViewportOptions): Viewport {
     matTexture,
   ];
 
+  // One shared weave texture set serves every piece: each piece's UVs are
+  // rotated to its own grainline (below), so per-piece texture clones are
+  // unnecessary — and a fabric swap repaints three canvases once.
+  const fabricTextures = createFabricTextures(project.fabric);
+  disposables.push(fabricTextures);
+
   for (const piece of project.pieces) {
     const extents = pieceExtents(piece);
     const outlineGeometry = pieceOutlineGeometry(piece);
+    // Weave and stripes run true to this piece's grain (the grainline lock).
+    applyGrainlineUVs(outlineGeometry, piece);
     // Move the bbox min-corner to the origin so placement positions the
     // piece by its layout slot, then lay it flat on the mat (XY → XZ).
     outlineGeometry.translate(-extents.minX, -extents.minY, 0);
     outlineGeometry.rotateX(-Math.PI / 2);
 
-    const material = new MeshStandardMaterial({
+    const material = new MeshPhysicalMaterial({
+      map: fabricTextures.map,
+      normalMap: fabricTextures.normalMap,
+      roughnessMap: fabricTextures.roughnessMap,
       color: project.fabric.color,
-      roughness: 0.85,
+      roughness: roughnessFor(project.fabric.weave),
       metalness: 0,
+      // Cloth response: sheen is the three.js material feature built for
+      // fabric (findings log §2); tint follows the fabric color, lightened.
+      sheen: 0.5,
+      sheenRoughness: 0.55,
+      sheenColor: new Color(project.fabric.color).lerp(
+        new Color('#ffffff'),
+        0.55,
+      ),
       // Push the fill behind its outline edges so the cutting line reads.
       polygonOffset: true,
       polygonOffsetFactor: 1,
@@ -223,6 +247,17 @@ export function createViewport(options: ViewportOptions): Viewport {
     controls.update();
   };
   applyPreset('three-d');
+
+  // --- Live fabric swap: one repaint, every piece re-skinned -------------
+  const applyFabric = (spec: FabricSpec): void => {
+    fabricTextures.update(spec);
+    const tint = new Color(spec.color).lerp(new Color('#ffffff'), 0.55);
+    for (const view of views) {
+      view.material.color.set(spec.color);
+      view.material.roughness = roughnessFor(spec.weave);
+      view.material.sheenColor.copy(tint);
+    }
+  };
 
   // --- Hover + tap selection (Pointer Events; hover is never required) ---
   const raycaster = new Raycaster();
@@ -373,5 +408,5 @@ export function createViewport(options: ViewportOptions): Viewport {
     });
   };
 
-  return { applyPreset, pieceScreenPositions, dispose };
+  return { applyPreset, applyFabric, pieceScreenPositions, dispose };
 }
