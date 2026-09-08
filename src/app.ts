@@ -9,9 +9,8 @@
  * change redrafts the pieces live, and a failed draft keeps the last valid
  * pattern on the mat.
  */
-import { createStarterProject } from './model';
+import { starterById, STARTERS } from './data/starters';
 import type { Project } from './model';
-import { NOTEBOOK_HOLDER_STARTER } from './data/notebookHolder';
 import {
   loadProject,
   parseProject,
@@ -87,7 +86,7 @@ function slugify(name: string): string {
  * dropped — a broken link or corrupted save must say so.
  */
 function loadStartupProject(): { project: Project; message: string } {
-  const starter = createStarterProject(NOTEBOOK_HOLDER_STARTER);
+  const starter = STARTERS[0].build();
 
   const token = readShareToken(window.location.hash);
   if (token !== null) {
@@ -149,6 +148,27 @@ export function mountApp(root: HTMLElement): void {
   const actions = document.createElement('div');
   actions.className = 'toolbar-actions';
   toolbar.appendChild(actions);
+
+  // Starter picker (starter ladder): selecting an entry mounts a fresh,
+  // fully validated StarterProject and narrates its learn card — the
+  // "what you'll learn" lesson arrives with the pieces on the mat.
+  const starterPicker = document.createElement('select');
+  starterPicker.className = 'starter-picker';
+  starterPicker.setAttribute('aria-label', 'Starter project');
+  for (const entry of STARTERS) {
+    const option = document.createElement('option');
+    option.value = entry.id;
+    option.textContent = entry.name;
+    starterPicker.appendChild(option);
+  }
+  starterPicker.addEventListener('change', () => {
+    const entry = starterById(starterPicker.value);
+    if (!entry) return;
+    const starter = entry.build();
+    mountProject(starter);
+    narrate(`Loaded starter '${entry.name}'. ${starter.learnCard}`);
+  });
+  actions.appendChild(starterPicker);
 
   const layout = document.createElement('div');
   layout.className = 'app-layout';
@@ -213,6 +233,9 @@ export function mountApp(root: HTMLElement): void {
     currentProject = project;
     selection.select(null);
     projectTitle.textContent = project.name;
+    // Keep the picker honest: a saved/imported project that is not a
+    // starter deselects it rather than lying about provenance.
+    starterPicker.value = starterById(project.id)?.id ?? '';
 
     canvasHolder.innerHTML = '';
     const canvas = document.createElement('canvas');
@@ -345,7 +368,13 @@ export function mountApp(root: HTMLElement): void {
     {
       onRedraft: (measurements) => {
         try {
-          const pieces = redraftPants(measurements);
+          // Starter-backed projects redraft their own full piece set (the
+          // pants starter's auxiliaries track the measurements too); any
+          // other project keeps main's behavior — Titan legs replace the
+          // pieces so measurements still drive something real.
+          const pieces =
+            starterById(currentProject.id)?.redraft(measurements) ??
+            redraftPants(measurements);
           // The redraft edits the live project's pieces, so Save/Export
           // capture what is on the mat.
           currentProject = { ...currentProject, pieces };
