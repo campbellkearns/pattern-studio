@@ -45,6 +45,7 @@ import {
   createFitController,
   easeInOutCubic,
   fitCameraToWork,
+  shadowFrustumHalfExtentCm,
   type CameraPoseCm,
 } from './cameraFit';
 import { createSurfaceMeshes } from './surfaceMeshes';
@@ -123,13 +124,23 @@ export function createViewport(options: ViewportOptions): Viewport {
   sun.position.set(90, 170, 110);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = -130;
-  sun.shadow.camera.right = 130;
-  sun.shadow.camera.top = 130;
-  sun.shadow.camera.bottom = -130;
   sun.shadow.camera.near = 20;
   sun.shadow.camera.far = 500;
   scene.add(sun);
+
+  /**
+   * Square shadow-frustum box for a half-extent in cm, centred on the rig
+   * origin: the box must cover the declared surfaces plus the laid-out
+   * work (or the assembly's posed footprint) — the old fixed ±130 box
+   * clipped shadows on oversized layouts. Recomputed when the work moves.
+   */
+  const applyShadowFrustum = (halfExtentCm: number): void => {
+    sun.shadow.camera.left = -halfExtentCm;
+    sun.shadow.camera.right = halfExtentCm;
+    sun.shadow.camera.top = halfExtentCm;
+    sun.shadow.camera.bottom = -halfExtentCm;
+    sun.shadow.camera.updateProjectionMatrix();
+  };
 
   // --- Surfaces: fixed reference mat + paper roll (shared module) ---------
   const surfaces = createSurfaceMeshes();
@@ -193,6 +204,10 @@ export function createViewport(options: ViewportOptions): Viewport {
     const work = workBoundsCm(placedBoxes);
     currentWork = work;
     surfaces.setPaperExtent(paperSurfaceExtentCm(work));
+    // Shadows follow the work: paper extension and overflow rows must cast,
+    // so the frustum is re-sized with every layout. The first build (load)
+    // lands here too — before any frame renders.
+    applyShadowFrustum(shadowFrustumHalfExtentCm(work));
 
     for (const piece of pieces) {
       const extents = pieceExtents(piece);

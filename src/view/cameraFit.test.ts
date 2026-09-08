@@ -9,6 +9,7 @@ import {
   shadowFrustumHalfExtentCm,
   shadowFrustumHalfExtentForRectsCm,
   surfacesWorldRectCm,
+  sweptGroundRectCm,
   workRectToWorldCm,
   type CameraPoseCm,
 } from './cameraFit';
@@ -187,6 +188,59 @@ describe('shadowFrustumHalfExtentForRectsCm', () => {
     const half = shadowFrustumHalfExtentForRectsCm([surfaces, posed]);
     // Union x [-90, 90], z [-60, 80]; +20 → 220 × 180 → half-diagonal.
     expect(half).toBeCloseTo(Math.hypot(220, 180) / 2, 3);
+  });
+});
+
+describe('sweptGroundRectCm', () => {
+  const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  const BOX = {
+    min: { x: 0, y: 0, z: 0 },
+    max: { x: 2, y: 2, z: 1 },
+  };
+
+  it('passes the box straight through under the identity matrix', () => {
+    expect(sweptGroundRectCm(BOX, [IDENTITY])).toEqual({
+      minX: 0,
+      maxX: 2,
+      minZ: 0,
+      maxZ: 1,
+    });
+  });
+
+  it('translates with the matrix (assembly lifts and slides)', () => {
+    const moved = [...IDENTITY];
+    moved[12] = 10; // column-major: elements[12] is the x translation
+    moved[14] = -5; // ...and elements[14] the z translation
+    expect(sweptGroundRectCm(BOX, [moved])).toEqual({
+      minX: 10,
+      maxX: 12,
+      minZ: -5,
+      maxZ: -4,
+    });
+  });
+
+  it('rotates extents — a 90° yaw swaps x and z reach', () => {
+    // Column-major 90° about y: x' = z, z' = −x.
+    const yaw = [0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1];
+    expect(sweptGroundRectCm(BOX, [yaw])).toEqual({
+      minX: 0,
+      maxX: 1,
+      minZ: -2,
+      maxZ: 0,
+    });
+  });
+
+  it('unions the sweep — a fold swing widens the ground rect', () => {
+    const swung = [...IDENTITY];
+    swung[12] = -3; // second pose: shifted −3 in x
+    const swept = sweptGroundRectCm(BOX, [IDENTITY, swung]);
+    expect(swept.minX).toBe(-3);
+    expect(swept.maxX).toBe(2);
+  });
+
+  it('rejects malformed matrices and empty sweeps', () => {
+    expect(() => sweptGroundRectCm(BOX, [])).toThrow(RangeError);
+    expect(() => sweptGroundRectCm(BOX, [[1, 2, 3]])).toThrow(RangeError);
   });
 });
 

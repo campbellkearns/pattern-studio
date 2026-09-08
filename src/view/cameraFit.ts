@@ -102,6 +102,64 @@ export function surfacesWorldRectCm(work: BoundsCm | null): WorldRectCm {
   ]);
 }
 
+/**
+ * Union ground rect (cm) of an axis-aligned local box swept through world
+ * matrices — the posed footprint. Matrices are column-major 4×4 element
+ * arrays (THREE.Matrix4.elements order); folding transforms rotate pieces
+ * out of the ground plane, so only the transformed x/z extents count.
+ */
+export function sweptGroundRectCm(
+  localBox: {
+    readonly min: {
+      readonly x: number;
+      readonly y: number;
+      readonly z: number;
+    };
+    readonly max: {
+      readonly x: number;
+      readonly y: number;
+      readonly z: number;
+    };
+  },
+  matrices: readonly (readonly number[])[],
+): WorldRectCm {
+  const rect: { minX: number; maxX: number; minZ: number; maxZ: number } = {
+    minX: Infinity,
+    maxX: -Infinity,
+    minZ: Infinity,
+    maxZ: -Infinity,
+  };
+  const corners = [
+    [localBox.min.x, localBox.min.y, localBox.min.z],
+    [localBox.max.x, localBox.min.y, localBox.min.z],
+    [localBox.min.x, localBox.max.y, localBox.min.z],
+    [localBox.max.x, localBox.max.y, localBox.min.z],
+    [localBox.min.x, localBox.min.y, localBox.max.z],
+    [localBox.max.x, localBox.min.y, localBox.max.z],
+    [localBox.min.x, localBox.max.y, localBox.max.z],
+    [localBox.max.x, localBox.max.y, localBox.max.z],
+  ];
+  for (const elements of matrices) {
+    if (elements.length !== 16) {
+      throw new RangeError('expected a 16-element column-major matrix');
+    }
+    for (const [x, y, z] of corners) {
+      const wx =
+        elements[0] * x + elements[4] * y + elements[8] * z + elements[12];
+      const wz =
+        elements[2] * x + elements[6] * y + elements[10] * z + elements[14];
+      if (wx < rect.minX) rect.minX = wx;
+      if (wx > rect.maxX) rect.maxX = wx;
+      if (wz < rect.minZ) rect.minZ = wz;
+      if (wz > rect.maxZ) rect.maxZ = wz;
+    }
+  }
+  if (matrices.length === 0) {
+    throw new RangeError('expected at least one world matrix');
+  }
+  return rect;
+}
+
 export interface FitOptions {
   /** The perspective camera's vertical field of view, degrees (0, 180). */
   readonly fovDeg: number;
