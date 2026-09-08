@@ -27,6 +27,13 @@ import {
   readShareToken,
 } from './io/shareLink';
 import { createFabricPanel } from './view/fabricPanel';
+import {
+  isTextEntryTarget,
+  shortcutAction,
+  shortcutHint,
+} from './view/shortcuts';
+import { statusClassName } from './view/statusTone';
+import type { StatusTone } from './view/statusTone';
 import { TITAN_PANTS_TEMPLATE } from './engine/titanSettings';
 import { redraftPants } from './engine/titanPants';
 import { createAssemblyControls } from './view/assemblyControls';
@@ -220,7 +227,7 @@ export function mountApp(root: HTMLElement): void {
       : `Selected: ${id}.`;
   };
   const renderStatus = (id: string | null): void => {
-    status.textContent = statusFor(id);
+    narrate(statusFor(id));
   };
 
   /** Swap the live project: tear the old views down, mount fresh ones. */
@@ -328,6 +335,7 @@ export function mountApp(root: HTMLElement): void {
       mountProject(currentProject);
       narrate(
         `Cannot assemble this project (${errorMessage(error)}) — the cutting mat is unchanged.`,
+        'error',
       );
       return;
     }
@@ -350,8 +358,12 @@ export function mountApp(root: HTMLElement): void {
   }
 
   // Narration and selection share the status bar: the latest event wins.
-  const narrate = (message: string): void => {
+  // The tone dresses the pill (error/success) so outcomes read at a glance.
+  const narrate = (message: string, tone: StatusTone = 'info'): void => {
     status.textContent = message;
+    status.classList.remove('error', 'success');
+    const className = statusClassName(tone);
+    if (className) status.classList.add(className);
   };
 
   mountProject(startup.project);
@@ -411,9 +423,9 @@ export function mountApp(root: HTMLElement): void {
   addButton('Save', () => {
     try {
       saveProject(window.localStorage, currentProject);
-      narrate(`Saved '${currentProject.name}' to this browser.`);
+      narrate(`Saved '${currentProject.name}' to this browser.`, 'success');
     } catch (error) {
-      narrate(`Could not save (${errorMessage(error)}).`);
+      narrate(`Could not save (${errorMessage(error)}).`, 'error');
     }
   });
 
@@ -421,11 +433,11 @@ export function mountApp(root: HTMLElement): void {
     const saved = loadProject(window.localStorage);
     if (saved.status === 'found') {
       mountProject(saved.project);
-      narrate(`Loaded '${saved.project.name}' from this browser.`);
+      narrate(`Loaded '${saved.project.name}' from this browser.`, 'success');
     } else if (saved.status === 'empty') {
       narrate('Nothing saved yet — press Save first.');
     } else {
-      narrate(`Saved project is invalid: ${saved.reason}`);
+      narrate(`Saved project is invalid: ${saved.reason}`, 'error');
     }
   });
 
@@ -441,6 +453,7 @@ export function mountApp(root: HTMLElement): void {
           copied
             ? `Share link copied (${plan.urlLength} characters) — opening it loads '${currentProject.name}'.`
             : 'Could not reach the clipboard — use Export JSON to share this project instead.',
+          copied ? 'success' : 'error',
         );
         return;
       }
@@ -450,6 +463,7 @@ export function mountApp(root: HTMLElement): void {
         copied
           ? `Too large for a link (${plan.urlLength} characters, limit ${MAX_SHARE_URL_LENGTH}) — the project JSON was copied instead. Send it to Import JSON.`
           : `Too large for a link (${plan.urlLength} characters) and the clipboard is unavailable — use Export JSON instead.`,
+        copied ? 'success' : 'error',
       );
     })();
   });
@@ -511,6 +525,38 @@ export function mountApp(root: HTMLElement): void {
           : (viewport?.pieceScreenPositions() ?? []),
     };
   }
+
+  // --- Keyboard shortcuts (blueprint polish bar) ---------------------------
+  // Accelerators, not paths: every shortcut's effect is available as a tap.
+  // The pure router decides meaning; typing targets never trigger shortcuts.
+  document.addEventListener('keydown', (event) => {
+    if (isTextEntryTarget(event.target)) return;
+    const action = shortcutAction(event.key, {
+      alt: event.altKey,
+      ctrl: event.ctrlKey,
+      meta: event.metaKey,
+      shift: event.shiftKey,
+    });
+    if (!action) return;
+    switch (action) {
+      case 'preset-top':
+        viewport?.applyPreset('top');
+        break;
+      case 'preset-3d':
+        viewport?.applyPreset('three-d');
+        break;
+      case 'assemble':
+        if (!assemblyView) enterAssembly();
+        break;
+      case 'exit-or-deselect':
+        if (assemblyView) exitAssembly();
+        else selection.select(null);
+        break;
+      case 'show-shortcuts':
+        narrate(shortcutHint());
+        break;
+    }
+  });
 
   window.addEventListener('pagehide', () => {
     unsubscribe?.();

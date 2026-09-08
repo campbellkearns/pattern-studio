@@ -89,4 +89,33 @@ describe('piece panel', () => {
     expect(selection.get()).toBe('cover');
     container.remove();
   });
+
+  it('shows the empty state for a zero-piece project, then recovers', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const selection = createSelectionStore();
+    const handle = createPiecePanel(container, [], selection, {
+      onPreset: vi.fn(),
+    });
+
+    // A validated project may carry zero pieces (a hand-edited import):
+    // the panel must say so instead of rendering a blank list.
+    const empty = container.querySelector('.panel-empty');
+    expect(empty?.textContent).toContain('No pieces on the mat');
+    expect((empty as HTMLElement | null)?.hidden).toBe(false);
+    expect(
+      (container.querySelector('.piece-list') as HTMLElement | null)?.hidden,
+    ).toBe(true);
+
+    // Redrafting pieces back onto the mat hides the note again.
+    const project = createStarterProject(NOTEBOOK_HOLDER_STARTER);
+    handle.updatePieces(project.pieces);
+    expect((empty as HTMLElement | null)?.hidden).toBe(true);
+    expect(
+      (container.querySelector('.piece-list') as HTMLElement | null)?.hidden,
+    ).toBe(false);
+
+    handle.dispose();
+    container.remove();
+  });
 });

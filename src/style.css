@@ -318,6 +318,21 @@ button:active:not(:disabled) {
   font-variant-numeric: tabular-nums;
 }
 
+/* Off-happy-path: a project with zero pieces says so instead of a blank. */
+.panel-empty {
+  margin: 0;
+  padding: 14px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-m);
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.panel-empty[hidden] {
+  display: none;
+}
+
 /* --- Fabric panel ---------------------------------------------------------- */
 
 .fabric-group {
