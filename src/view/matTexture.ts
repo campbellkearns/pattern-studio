@@ -5,9 +5,8 @@
  * (needs CanvasRenderingContext2D); jsdom tests avoid it.
  */
 import { CanvasTexture, RepeatWrapping, SRGBColorSpace } from 'three';
+import { MAT_TILE_CM } from './matSurface';
 
-/** World centimetres covered by one texture tile. */
-export const MAT_TILE_CM = 10;
 /** Canvas pixels per world centimetre. */
 const PX_PER_CM = 24;
 
