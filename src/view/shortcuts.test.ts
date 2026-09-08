@@ -5,6 +5,8 @@ describe('shortcutAction', () => {
   it('maps the bare keys to shell actions', () => {
     expect(shortcutAction('1')).toBe('preset-top');
     expect(shortcutAction('2')).toBe('preset-3d');
+    expect(shortcutAction('f')).toBe('refit-camera');
+    expect(shortcutAction('F')).toBe('refit-camera');
     expect(shortcutAction('a')).toBe('assemble');
     expect(shortcutAction('A')).toBe('assemble');
     expect(shortcutAction('Escape')).toBe('exit-or-deselect');
@@ -21,7 +23,8 @@ describe('shortcutAction', () => {
     expect(shortcutAction('a', { ctrl: true })).toBeNull();
     expect(shortcutAction('a', { meta: true })).toBeNull();
     expect(shortcutAction('a', { alt: true })).toBeNull();
-    // Shift is reserved for '?' — capital A is typing, not a shortcut.
+    // Shift is reserved for '?' — capital F is typing, not a shortcut.
+    expect(shortcutAction('F', { shift: true })).toBeNull();
     expect(shortcutAction('A', { shift: true })).toBeNull();
     expect(shortcutAction('1', { shift: true })).toBeNull();
   });
@@ -57,7 +60,7 @@ describe('isTextEntryTarget', () => {
 describe('shortcutHint', () => {
   it('names every routed shortcut so ? is discoverable', () => {
     const hint = shortcutHint();
-    for (const fragment of ['1', '2', 'A', 'Esc', '?']) {
+    for (const fragment of ['1', '2', 'F', 'A', 'Esc', '?']) {
       expect(hint).toContain(fragment);
     }
   });

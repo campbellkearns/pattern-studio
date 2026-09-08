@@ -27,6 +27,8 @@ import {
   readShareToken,
 } from './io/shareLink';
 import { createFabricPanel } from './view/fabricPanel';
+import { createRefitButton } from './view/refitButton';
+import type { RefitButtonHandle } from './view/refitButton';
 import {
   isTextEntryTarget,
   shortcutAction,
@@ -218,6 +220,7 @@ export function mountApp(root: HTMLElement): void {
   let fabricHandle: { dispose(): void } | null = null;
   let unsubscribe: (() => void) | null = null;
   let assembleButton: HTMLButtonElement | null = null;
+  let refitButtonHandle: RefitButtonHandle | null = null;
 
   const statusFor = (id: string | null): string => {
     if (!id) return 'Nothing selected — tap a piece or pick one from the list.';
@@ -281,6 +284,8 @@ export function mountApp(root: HTMLElement): void {
     });
     unsubscribe = selection.subscribe(renderStatus);
     renderStatus(selection.get());
+    // The mat viewport is live again — refit has work to frame.
+    refitButtonHandle?.setEnabled(true);
   };
 
   // --- Assembly mode (fold-around-seam walkthrough) ------------------------
@@ -352,6 +357,8 @@ export function mountApp(root: HTMLElement): void {
       onExit: exitAssembly,
     });
     if (assembleButton) assembleButton.disabled = true;
+    // Assembly swaps the mat viewport out — refit has nothing to frame.
+    refitButtonHandle?.setEnabled(false);
     narrate(
       `Assembly — ${labels.length} seam${labels.length === 1 ? '' : 's'} to fold. Scrub through them.`,
     );
@@ -419,6 +426,11 @@ export function mountApp(root: HTMLElement): void {
 
   // Mode entry: the Assemble button hands the stage to the fold walkthrough.
   assembleButton = addButton('Assemble', enterAssembly);
+
+  // Camera refit: the tap equivalent of the F shortcut. Built once; the
+  // mode transitions below decide when it has a viewport to act on.
+  refitButtonHandle = createRefitButton(actions, () => viewport?.refit());
+  refitButtonHandle.setEnabled(false); // enabled when the mat mounts
 
   addButton('Save', () => {
     try {
@@ -544,6 +556,9 @@ export function mountApp(root: HTMLElement): void {
         break;
       case 'preset-3d':
         viewport?.applyPreset('three-d');
+        break;
+      case 'refit-camera':
+        viewport?.refit();
         break;
       case 'assemble':
         if (!assemblyView) enterAssembly();

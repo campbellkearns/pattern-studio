@@ -38,7 +38,15 @@ import {
   paperSurfaceExtentCm,
   surfaceHeightCm,
   workBoundsCm,
+  type BoundsCm,
 } from './matSurface';
+import {
+  FIT_VIEW_DIRECTION,
+  createFitController,
+  easeInOutCubic,
+  fitCameraToWork,
+  type CameraPoseCm,
+} from './cameraFit';
 import { createSurfaceMeshes } from './surfaceMeshes';
 import {
   applyGrainlineUVs,
@@ -65,6 +73,11 @@ export interface Viewport {
   applyFabric(spec: FabricSpec): void;
   /** Replace the rendered pieces (parametric redraft); layout recomputes. */
   updatePieces(pieces: readonly Piece[]): void;
+  /**
+   * Animate the camera back to the fitted work bounds — the tap equivalent
+   * of the F shortcut. Always obeys: refit is the user's explicit hand.
+   */
+  refit(): void;
   /** Dev/dogfood aid: each piece's centre in client coordinates. */
   pieceScreenPositions(): Array<{ id: string; x: number; y: number }>;
   dispose(): void;
@@ -76,6 +89,8 @@ const PIECE_LIFT_CM = 0.06;
 const MARKS_LIFT_CM = 0.04;
 /** Max pointer travel (px) between down and up that still counts as a tap. */
 const TAP_SLOP_PX = 8;
+/** Duration of the animated camera fit (blueprint States table: animated). */
+const FIT_ANIMATION_MS = 700;
 
 const HOVER_EMISSIVE = 0x2a3b44;
 const SELECT_EMISSIVE = 0x5a4410;
@@ -133,13 +148,12 @@ export function createViewport(options: ViewportOptions): Viewport {
   let currentFabric: FabricSpec = project.fabric;
   const fabricTextures = createFabricTextures(currentFabric);
 
-  const sharedDisposables: { dispose(): void }[] = [
-    surfaces,
-    fabricTextures,
-  ];
+  const sharedDisposables: { dispose(): void }[] = [surfaces, fabricTextures];
   let pieceDisposables: { dispose(): void }[] = [];
   let views: PieceView[] = [];
   let meshes: Mesh[] = [];
+  /** Ground bounds of the current layout, in mat cm — the fit's subject. */
+  let currentWork: BoundsCm | null = null;
 
   /** Remove every piece view, freeing only the per-piece GPU resources. */
   const clearPieceViews = (): void => {
@@ -176,7 +190,9 @@ export function createViewport(options: ViewportOptions): Viewport {
         heightCm: e.height,
       };
     });
-    surfaces.setPaperExtent(paperSurfaceExtentCm(workBoundsCm(placedBoxes)));
+    const work = workBoundsCm(placedBoxes);
+    currentWork = work;
+    surfaces.setPaperExtent(paperSurfaceExtentCm(work));
 
     for (const piece of pieces) {
       const extents = pieceExtents(piece);
@@ -266,6 +282,77 @@ export function createViewport(options: ViewportOptions): Viewport {
     // A redrafted piece set can drop ids the selection/hover still name.
     setHover(null);
     refreshVisuals();
+    // Blueprint States table, redraft row: the auto-fit re-fires only when
+    // the redraft flips the overflow state — and the fit controller keeps
+    // it off entirely once the user's hand has taken the camera.
+    if (fitController.workChanged(currentWork)) animateFit();
+  };
+
+  // --- Camera fit: autopilot that never fights the user's hand ------------
+  const fitController = createFitController();
+
+  interface FitAnimation {
+    fromPosition: Vector3;
+    fromTarget: Vector3;
+    to: CameraPoseCm;
+    startedAt: number;
+  }
+  let fitAnimation: FitAnimation | null = null;
+
+  const poseVector = (p: {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+  }): Vector3 => new Vector3(p.x, p.y, p.z);
+
+  const animateFit = (): void => {
+    if (!currentWork) return; // nothing to frame — keep the current pose
+    fitAnimation = {
+      fromPosition: camera.position.clone(),
+      fromTarget: controls.target.clone(),
+      to: fitCameraToWork(currentWork, {
+        fovDeg: camera.fov,
+        aspect: camera.aspect,
+      }),
+      startedAt: performance.now(),
+    };
+  };
+
+  const stepFitAnimation = (nowMs: number): void => {
+    if (!fitAnimation) return;
+    const linear = Math.min(
+      (nowMs - fitAnimation.startedAt) / FIT_ANIMATION_MS,
+      1,
+    );
+    const k = easeInOutCubic(linear);
+    camera.position.lerpVectors(
+      fitAnimation.fromPosition,
+      poseVector(fitAnimation.to.position),
+      k,
+    );
+    controls.target.lerpVectors(
+      fitAnimation.fromTarget,
+      poseVector(fitAnimation.to.target),
+      k,
+    );
+    if (linear >= 1) fitAnimation = null;
+  };
+
+  const cameraPose = (): CameraPoseCm => ({
+    position: {
+      x: camera.position.x,
+      y: camera.position.y,
+      z: camera.position.z,
+    },
+    target: {
+      x: controls.target.x,
+      y: controls.target.y,
+      z: controls.target.z,
+    },
+  });
+
+  const refit = (): void => {
+    if (fitController.refit()) animateFit();
   };
 
   // --- Camera + controls (native touch map, set explicitly) --------------
@@ -278,15 +365,32 @@ export function createViewport(options: ViewportOptions): Viewport {
   controls.maxDistance = 900;
 
   const applyPreset = (preset: CameraPreset): void => {
+    // An explicit preset is the user's hand too — auto-fit must not undo it.
+    fitController.commandApplied();
     if (preset === 'top') {
       camera.position.set(0, 250, 0.001);
     } else {
-      camera.position.set(95, 135, 150);
+      // Same direction the fit uses, so preset → refit reads as one move.
+      camera.position.set(
+        FIT_VIEW_DIRECTION.x,
+        FIT_VIEW_DIRECTION.y,
+        FIT_VIEW_DIRECTION.z,
+      );
     }
     controls.target.set(0, 0, 0);
     controls.update();
   };
   applyPreset('three-d');
+
+  // Grabbing the camera cancels an in-flight fit immediately; a real
+  // orbit/zoom (pose moved by gesture end) mutes further auto-fits.
+  controls.addEventListener('start', () => {
+    fitAnimation = null;
+    fitController.gestureBegan(cameraPose());
+  });
+  controls.addEventListener('end', () =>
+    fitController.gestureEnded(cameraPose()),
+  );
 
   // --- Live fabric swap: one repaint, every piece re-skinned -------------
   const applyFabric = (spec: FabricSpec): void => {
@@ -408,8 +512,15 @@ export function createViewport(options: ViewportOptions): Viewport {
 
   renderer.setAnimationLoop(() => {
     controls.update();
+    // The fit has the last word each frame: a fresh lerp wins over any
+    // residual damping drift, until a gesture cancels it (see 'start').
+    stepFitAnimation(performance.now());
     renderer.render(scene, camera);
   });
+
+  // Blueprint States table, load row: fit once now — before the first
+  // orbit — animated, and let manual zoom win until an explicit refit.
+  if (fitController.load(currentWork)) animateFit();
 
   // --- Teardown -----------------------------------------------------------
   const dispose = (): void => {
@@ -450,5 +561,12 @@ export function createViewport(options: ViewportOptions): Viewport {
     });
   };
 
-  return { applyPreset, applyFabric, updatePieces, pieceScreenPositions, dispose };
+  return {
+    applyPreset,
+    applyFabric,
+    updatePieces,
+    refit,
+    pieceScreenPositions,
+    dispose,
+  };
 }

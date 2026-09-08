@@ -11,6 +11,7 @@
 export type ShortcutAction =
   | 'preset-top'
   | 'preset-3d'
+  | 'refit-camera'
   | 'assemble'
   | 'exit-or-deselect'
   | 'show-shortcuts';
@@ -40,6 +41,9 @@ export function shortcutAction(
       return 'preset-top';
     case '2':
       return 'preset-3d';
+    case 'f':
+    case 'F':
+      return 'refit-camera';
     case 'a':
     case 'A':
       return 'assemble';
@@ -76,7 +80,7 @@ export function isTextEntryTarget(target: EventTarget | null): boolean {
 /** The '?' narration: discoverability for a map nobody has memorised. */
 export function shortcutHint(): string {
   return (
-    'Shortcuts — 1: top view, 2: 3D view, A: assemble, ' +
+    'Shortcuts — 1: top view, 2: 3D view, F: refit camera, A: assemble, ' +
     'Esc: exit assembly or clear selection, ?: this hint.'
   );
 }
