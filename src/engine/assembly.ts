@@ -203,8 +203,13 @@ export function chainMeasuredLength(piece: Piece, chain: EdgeChain): number {
   return length;
 }
 
-/** Bounding-box centre of the full outline (for placement, not layout). */
-function pieceBBoxCentre(piece: Piece): Vec2 {
+/**
+ * Bounding-box centre of the full outline (sampled along curves), in
+ * piece-local centimetres. The engine places pieces by this centre — the
+ * assembly view pre-translates geometry by it so engine poses map straight
+ * onto view meshes.
+ */
+export function outlineBBoxCentre(piece: Piece): Vec2 {
   const vertices = outlineVertices(piece);
   const closedChain: EdgeChain = {
     pieceId: piece.id,
@@ -229,7 +234,7 @@ function pieceBBoxCentre(piece: Piece): Vec2 {
 
 /** Piece-local XY → mat plane: the same rotateX(-π/2) the viewport uses. */
 function flatPoseCentredAt(centreWorldX: number, centreWorldZ: number, piece: Piece): Matrix4 {
-  const centre = pieceBBoxCentre(piece);
+  const centre = outlineBBoxCentre(piece);
   // Rotate the local plane onto the mat, then re-centre: R·T(-centre).
   const toOrigin = new Matrix4()
     .makeRotationX(-Math.PI / 2)
@@ -417,7 +422,7 @@ export function planAssembly(project: Project, options: PlanOptions = {}): Assem
   let parkCursorX = parkOrigin.xCm;
 
   const parkPiece = (piece: Piece): void => {
-    const centre = pieceBBoxCentre(piece);
+    const centre = outlineBBoxCentre(piece);
     // Simple shelf: advance the cursor by the piece's world width + gap.
     const halfWidth = Math.abs(centre.x) + 1; // conservative: centre-offset half-extent
     basePoses.set(
@@ -459,7 +464,7 @@ export function planAssembly(project: Project, options: PlanOptions = {}): Assem
       const rootZ = rootAnchorsPlaced === 0 ? 0 : parkOrigin.zCm;
       basePoses.set(anchorId, flatPoseCentredAt(rootX, rootZ, anchor));
       if (rootAnchorsPlaced > 0) {
-        parkCursorX += 2 * (Math.abs(pieceBBoxCentre(anchor).x) + 1) + 6;
+        parkCursorX += 2 * (Math.abs(outlineBBoxCentre(anchor).x) + 1) + 6;
       }
       anchorPose = basePoses.get(anchorId)!;
       placed.set(anchorId, anchorPose);
@@ -481,13 +486,13 @@ export function planAssembly(project: Project, options: PlanOptions = {}): Assem
     const hinge = hingeFromChain(anchorChainWorldPoints);
 
     const moverCentreLocal = new Vector3(
-      pieceBBoxCentre(mover).x,
-      pieceBBoxCentre(mover).y,
+      outlineBBoxCentre(mover).x,
+      outlineBBoxCentre(mover).y,
       0,
     );
     const anchorCentreWorld = new Vector3(
-      pieceBBoxCentre(anchor).x,
-      pieceBBoxCentre(anchor).y,
+      outlineBBoxCentre(anchor).x,
+      outlineBBoxCentre(anchor).y,
       0,
     ).applyMatrix4(anchorPose);
 

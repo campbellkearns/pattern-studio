@@ -423,3 +423,90 @@ body {
 .draft-error[hidden] {
   display: none;
 }
+
+/* --- Assembly mode -------------------------------------------------------
+   Bottom-anchored walkthrough bar: scrubber first (tablet thumbs), seam
+   narration, then the exit. Everything oversized for fingertips. */
+
+.assembly-bar {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface-raised) 88%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.assembly-heading {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.assembly-counter {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.assembly-note {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft, #5b6672);
+}
+
+.assembly-scrubber {
+  width: 100%;
+  height: 44px; /* thumb-sized touch target, not a hairline track */
+  margin: 0;
+  accent-color: var(--accent);
+  touch-action: none;
+}
+
+.assembly-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.assembly-btn {
+  flex: 1;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.assembly-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.assembly-btn:active:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.assembly-exit {
+  flex: none;
+  min-width: 120px;
+}
+
+.assembly-learn-card {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-raised));
+  color: var(--ink);
+  font-size: 0.9rem;
+}
