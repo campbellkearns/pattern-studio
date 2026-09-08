@@ -96,9 +96,7 @@ function requireFinite(value: number, label: string): number {
 }
 
 /** Clamp panel input into the field ranges — UI bounds are the same numbers. */
-export function clampMeasurements(
-  input: PantMeasurements,
-): PantMeasurements {
+export function clampMeasurements(input: PantMeasurements): PantMeasurements {
   const clamped = {} as Record<keyof PantMeasurements, number>;
   for (const key of Object.keys(PANT_MEASUREMENT_RANGES) as Array<
     keyof PantMeasurements
@@ -108,6 +106,16 @@ export function clampMeasurements(
     clamped[key] = clamp(value, min, max);
   }
   return clamped as PantMeasurements;
+}
+
+/**
+ * Crotch depth below the waist line, cm: waistToUpperLeg × (1 + crotchDrop).
+ * Exported because starter data (fly shield) and fit explainers size off the
+ * fork depth too — one formula, quoted once.
+ */
+export function forkDepthCm(input: PantMeasurements): number {
+  const m = clampMeasurements(input);
+  return (MODEL_WAIST_TO_UPPER_LEG_MM * (1 + m.crotchDropPct / 100)) / 10;
 }
 
 export interface TitanSettings {
@@ -130,7 +138,7 @@ export interface TitanSettings {
 export function toTitanSettings(input: PantMeasurements): TitanSettings {
   const m = clampMeasurements(input);
 
-  const forkDepthMm = MODEL_WAIST_TO_UPPER_LEG_MM * (1 + m.crotchDropPct / 100);
+  const forkDepthMm = forkDepthCm(m) * 10;
   const inseamMm = m.inseamCm * 10;
   const waistToFloorMm = forkDepthMm + inseamMm;
 
