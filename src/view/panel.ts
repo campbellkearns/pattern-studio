@@ -44,7 +44,8 @@ export function createPiecePanel(
 
   const presets = document.createElement('div');
   presets.className = 'presets';
-  const presetButtons: { button: HTMLButtonElement; handler: () => void }[] = [];
+  const presetButtons: { button: HTMLButtonElement; handler: () => void }[] =
+    [];
   for (const preset of ['top', 'three-d'] as const) {
     const button = document.createElement('button');
     button.type = 'button';
@@ -59,6 +60,13 @@ export function createPiecePanel(
 
   const list = document.createElement('ul');
   list.className = 'piece-list';
+
+  // Empty state: a validated project may carry zero pieces (a hand-edited
+  // import), and an empty list must say so instead of showing a blank panel.
+  const empty = document.createElement('p');
+  empty.className = 'panel-empty';
+  empty.textContent =
+    'No pieces on the mat — pick a starter or import a project.';
 
   let entries: { button: HTMLButtonElement; onClick: () => void }[] = [];
 
@@ -89,10 +97,12 @@ export function createPiecePanel(
       button.addEventListener('click', onClick);
       entries.push({ button, onClick });
     }
+    list.hidden = pieces.length === 0;
+    empty.hidden = pieces.length > 0;
   };
   buildList();
 
-  container.append(header, list);
+  container.append(header, list, empty);
 
   const render = (selectedId: string | null): void => {
     for (const { button } of entries) {
