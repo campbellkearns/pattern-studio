@@ -17,6 +17,12 @@ export interface FabricSpec {
   readonly color: string;
   /** Fabric weight in grams per square metre (gsm). */
   readonly weight: number;
+  /**
+   * Colored warp-stripe band width in centimetres; undefined = solid colour.
+   * Stripes run along the grainline — the visual proof that each piece's
+   * grainline-locked UVs rotate the weave true to grain.
+   */
+  readonly stripeCm?: number;
 }
 
 const WEAVE_TYPES: readonly WeaveType[] = ['plain', 'twill', 'satin'];
@@ -38,5 +44,10 @@ export function createFabricSpec(input: FabricSpec): FabricSpec {
     weaveScale: requirePositive(input.weaveScale, 'fabric weaveScale'),
     color: input.color,
     weight: requirePositive(input.weight, 'fabric weight'),
+    // Additive optional parameter: only validated when present.
+    stripeCm:
+      input.stripeCm === undefined
+        ? undefined
+        : requirePositive(input.stripeCm, 'fabric stripeCm'),
   });
 }

@@ -53,3 +53,23 @@ describe('createFabricSpec', () => {
     expect(createFabricSpec(denim({ color: '#A1b2C3' })).color).toBe('#A1b2C3');
   });
 });
+
+describe('createFabricSpec stripeCm (additive)', () => {
+  it('leaves stripeCm undefined when omitted', () => {
+    const spec = createFabricSpec(denim());
+    expect(spec.stripeCm).toBeUndefined();
+  });
+
+  it('keeps a positive stripeCm intact', () => {
+    const spec = createFabricSpec(denim({ stripeCm: 0.8 }));
+    expect(spec.stripeCm).toBe(0.8);
+  });
+
+  it('rejects non-positive stripeCm when present', () => {
+    expect(() => createFabricSpec(denim({ stripeCm: 0 }))).toThrow(/> 0/);
+    expect(() => createFabricSpec(denim({ stripeCm: -1 }))).toThrow(/> 0/);
+    expect(() => createFabricSpec(denim({ stripeCm: Number.NaN }))).toThrow(
+      /finite/,
+    );
+  });
+});
