@@ -2,10 +2,28 @@
  * App shell: glues the starter project, viewport, and piece panel together
  * and owns the two off-happy-path states the blueprint requires — the
  * WebGL 2 unsupported-device screen and the status readout that narrates
- * selection without relying on hover.
+ * selection without relying on hover. The toolbar (F7, projects as data)
+ * carries localStorage save/load and JSON import/export; every persistence
+ * outcome — including failures — is narrated in the status bar, never silent.
  */
 import { createStarterProject } from './model';
+import type { Project } from './model';
 import { NOTEBOOK_HOLDER_STARTER } from './data/notebookHolder';
+import {
+  loadProject,
+  parseProject,
+  saveProject,
+  serializeProject,
+} from './io/projectIo';
+import { copyTextToClipboard } from './io/clipboardIo';
+import { exportPiecesSvg } from './io/svgExport';
+import { downloadTextFile, pickJsonText } from './io/fileIo';
+import {
+  MAX_SHARE_URL_LENGTH,
+  decodeProjectToken,
+  planShare,
+  readShareToken,
+} from './io/shareLink';
 import { createFabricPanel } from './view/fabricPanel';
 import { createPiecePanel } from './view/panel';
 import { supportsWebGL2 } from './view/webgl';
@@ -38,6 +56,67 @@ function renderUnsupported(container: HTMLElement): void {
   container.appendChild(notice);
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** File-name-safe form of a project name for downloads. */
+function slugify(name: string): string {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug.length > 0 ? slug : 'pattern';
+}
+
+/**
+ * Cold-start project: a shared link wins (the hash is consumed after load so
+ * a plain reload doesn't replay the link over later saves), then the project
+ * saved in this browser, then the starter. Anything invalid is narrated, not
+ * dropped — a broken link or corrupted save must say so.
+ */
+function loadStartupProject(): { project: Project; message: string } {
+  const starter = createStarterProject(NOTEBOOK_HOLDER_STARTER);
+
+  const token = readShareToken(window.location.hash);
+  if (token !== null) {
+    const parsed = decodeProjectToken(token);
+    if (parsed.status === 'ok') {
+      history.replaceState(
+        null,
+        '',
+        window.location.pathname + window.location.search,
+      );
+      return {
+        project: parsed.project,
+        message: `Loaded '${parsed.project.name}' from the shared link.`,
+      };
+    }
+    return {
+      project: starter,
+      message: `The shared link held an invalid project (${parsed.reason}) — showing the starter instead.`,
+    };
+  }
+
+  const saved = loadProject(window.localStorage);
+  if (saved.status === 'found') {
+    return {
+      project: saved.project,
+      message: `Restored '${saved.project.name}' from this browser.`,
+    };
+  }
+  if (saved.status === 'invalid') {
+    return {
+      project: starter,
+      message: `Saved project was invalid (${saved.reason}) — showing the starter.`,
+    };
+  }
+  return {
+    project: starter,
+    message: `Showing the starter: '${starter.name}'.`,
+  };
+}
+
 export function mountApp(root: HTMLElement): void {
   root.innerHTML = '';
 
@@ -46,8 +125,37 @@ export function mountApp(root: HTMLElement): void {
     return;
   }
 
+  // --- Static chrome ------------------------------------------------------
+  const shell = document.createElement('div');
+  shell.className = 'app-shell';
+
+  const toolbar = document.createElement('header');
+  toolbar.className = 'toolbar';
+  const projectTitle = document.createElement('h1');
+  projectTitle.className = 'project-title';
+  toolbar.appendChild(projectTitle);
+
+  const actions = document.createElement('div');
+  actions.className = 'toolbar-actions';
+  toolbar.appendChild(actions);
+
   const layout = document.createElement('div');
   layout.className = 'app-layout';
+
+  const canvasHolder = document.createElement('div');
+  canvasHolder.className = 'viewport-holder';
+
+  const panel = document.createElement('aside');
+  panel.className = 'panel';
+  // The piece list owns this subtree (createPiecePanel clears it per
+  // mount); the fabric panel lives beside it and survives re-mounts.
+  const panelBody = document.createElement('div');
+  panelBody.className = 'panel-body';
+  panel.appendChild(panelBody);
+  const fabricSection = document.createElement('section');
+  fabricSection.className = 'fabric-panel';
+  panel.appendChild(fabricSection);
+  layout.append(canvasHolder, panel);
 
   const status = document.createElement('div');
   status.className = 'status-bar';
@@ -55,58 +163,182 @@ export function mountApp(root: HTMLElement): void {
   status.textContent =
     'Nothing selected — tap a piece or pick one from the list.';
 
-  const canvasHolder = document.createElement('div');
-  canvasHolder.className = 'viewport-holder';
-  const canvas = document.createElement('canvas');
-  canvas.className = 'viewport-canvas';
-  // Canvas-level pointer-events lockdown per the blueprint; the CSS class
-  // carries the same rule for browsers where the attribute arrives late.
-  canvas.style.touchAction = 'none';
-  canvasHolder.appendChild(canvas);
+  shell.append(toolbar, layout);
+  root.append(shell, status);
 
-  const panel = document.createElement('aside');
-  panel.className = 'panel';
-
-  layout.append(canvasHolder, panel);
-  root.append(layout, status);
-
-  const project = createStarterProject(NOTEBOOK_HOLDER_STARTER);
+  // --- Live project + view lifecycle --------------------------------------
+  const startup = loadStartupProject();
   const selection = createSelectionStore();
+  let currentProject: Project = startup.project;
   let viewport: Viewport | null = null;
+  let panelHandle: { dispose(): void } | null = null;
+  let fabricHandle: { dispose(): void } | null = null;
+  let unsubscribe: (() => void) | null = null;
 
   const statusFor = (id: string | null): string => {
     if (!id) return 'Nothing selected — tap a piece or pick one from the list.';
-    const piece = project.pieces.find((p) => p.id === id);
+    const piece = currentProject.pieces.find((p) => p.id === id);
     return piece
       ? `Selected: ${piece.name} (cut ${piece.cutCount}).`
       : `Selected: ${id}.`;
   };
+  const renderStatus = (id: string | null): void => {
+    status.textContent = statusFor(id);
+  };
 
-  try {
-    viewport = createViewport({
-      canvas,
-      container: canvasHolder,
-      project,
-      selection,
+  /** Swap the live project: tear the old views down, mount fresh ones. */
+  const mountProject = (project: Project): void => {
+    unsubscribe?.();
+    panelHandle?.dispose();
+    fabricHandle?.dispose();
+    viewport?.dispose();
+    currentProject = project;
+    selection.select(null);
+    projectTitle.textContent = project.name;
+
+    canvasHolder.innerHTML = '';
+    const canvas = document.createElement('canvas');
+    canvas.className = 'viewport-canvas';
+    // Canvas-level pointer-events lockdown per the blueprint; the CSS class
+    // carries the same rule for browsers where the attribute arrives late.
+    canvas.style.touchAction = 'none';
+    canvasHolder.appendChild(canvas);
+
+    try {
+      viewport = createViewport({
+        canvas,
+        container: canvasHolder,
+        project,
+        selection,
+      });
+    } catch (error) {
+      // Never swallow: the user gets the unsupported screen with the cause.
+      console.error('viewport failed to start', error);
+      renderUnsupported(root);
+      return;
+    }
+    panelHandle = createPiecePanel(panelBody, project.pieces, selection, {
+      onPreset: (preset) => viewport?.applyPreset(preset),
     });
-  } catch (error) {
-    // Never swallow: the user gets the unsupported screen with the cause.
-    console.error('viewport failed to start', error);
-    renderUnsupported(root);
-    return;
-  }
+    // Fabric panel: weave / scale / colour / stripe pickers that re-skin
+    // every piece live through the viewport. Re-created per mount so a
+    // loaded or imported project's fabric seeds the controls.
+    fabricHandle = createFabricPanel(fabricSection, project.fabric, {
+      onFabricChange: (spec) => viewport?.applyFabric(spec),
+    });
+    unsubscribe = selection.subscribe(renderStatus);
+    renderStatus(selection.get());
+  };
 
-  const panelHandle = createPiecePanel(panel, project.pieces, selection, {
-    onPreset: (preset) => viewport?.applyPreset(preset),
+  // Narration and selection share the status bar: the latest event wins.
+  const narrate = (message: string): void => {
+    status.textContent = message;
+  };
+
+  mountProject(startup.project);
+  narrate(startup.message);
+
+  // --- Toolbar (F7: projects as data) -------------------------------------
+  const addButton = (label: string, onClick: () => void): void => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'toolbar-btn';
+    button.textContent = label;
+    button.addEventListener('click', onClick);
+    actions.appendChild(button);
+  };
+
+  addButton('Save', () => {
+    try {
+      saveProject(window.localStorage, currentProject);
+      narrate(`Saved '${currentProject.name}' to this browser.`);
+    } catch (error) {
+      narrate(`Could not save (${errorMessage(error)}).`);
+    }
   });
 
-  // Fabric panel below the piece list: weave / scale / colour / stripe
-  // pickers that re-skin every piece live through the viewport.
-  const fabricSection = document.createElement('section');
-  fabricSection.className = 'fabric-panel';
-  panel.appendChild(fabricSection);
-  const fabricHandle = createFabricPanel(fabricSection, project.fabric, {
-    onFabricChange: (spec) => viewport?.applyFabric(spec),
+  addButton('Load', () => {
+    const saved = loadProject(window.localStorage);
+    if (saved.status === 'found') {
+      mountProject(saved.project);
+      narrate(`Loaded '${saved.project.name}' from this browser.`);
+    } else if (saved.status === 'empty') {
+      narrate('Nothing saved yet — press Save first.');
+    } else {
+      narrate(`Saved project is invalid: ${saved.reason}`);
+    }
+  });
+
+  addButton('Share', () => {
+    const plan = planShare(
+      currentProject,
+      window.location.origin + window.location.pathname,
+    );
+    void (async () => {
+      if (plan.kind === 'url') {
+        const copied = await copyTextToClipboard(plan.url);
+        narrate(
+          copied
+            ? `Share link copied (${plan.urlLength} characters) — opening it loads '${currentProject.name}'.`
+            : 'Could not reach the clipboard — use Export JSON to share this project instead.',
+        );
+        return;
+      }
+      // Share-mode failure state: URL over the length limit → clipboard JSON.
+      const copied = await copyTextToClipboard(plan.json);
+      narrate(
+        copied
+          ? `Too large for a link (${plan.urlLength} characters, limit ${MAX_SHARE_URL_LENGTH}) — the project JSON was copied instead. Send it to Import JSON.`
+          : `Too large for a link (${plan.urlLength} characters) and the clipboard is unavailable — use Export JSON instead.`,
+      );
+    })();
+  });
+
+  addButton('Export JSON', () => {
+    try {
+      downloadTextFile(
+        `${slugify(currentProject.name)}.pattern.json`,
+        serializeProject(currentProject),
+        'application/json',
+      );
+      narrate(`Exported '${currentProject.name}' as JSON.`);
+    } catch (error) {
+      narrate(`Export failed (${errorMessage(error)}).`);
+    }
+  });
+
+  addButton('Export SVG', () => {
+    try {
+      downloadTextFile(
+        `${slugify(currentProject.name)}.pattern.svg`,
+        exportPiecesSvg(currentProject),
+        'image/svg+xml',
+      );
+      narrate("Exported SVG — print at 100% scale (no 'fit to page').");
+    } catch (error) {
+      narrate(`SVG export failed (${errorMessage(error)}).`);
+    }
+  });
+
+  addButton('Import JSON', () => {
+    void (async () => {
+      try {
+        const text = await pickJsonText();
+        if (text === null) {
+          narrate('Import cancelled.');
+          return;
+        }
+        const parsed = parseProject(text);
+        if (parsed.status === 'invalid') {
+          narrate(`Import failed: ${parsed.reason}`);
+          return;
+        }
+        mountProject(parsed.project);
+        narrate(`Imported '${parsed.project.name}'.`);
+      } catch (error) {
+        narrate(`Import failed (${errorMessage(error)}).`);
+      }
+    })();
   });
 
   // Dev-only dogfooding hook (stripped from production builds): lets the
@@ -117,16 +349,10 @@ export function mountApp(root: HTMLElement): void {
     };
   }
 
-  const renderStatus = (id: string | null): void => {
-    status.textContent = statusFor(id);
-  };
-  renderStatus(selection.get());
-  const unsubscribe = selection.subscribe(renderStatus);
-
   window.addEventListener('pagehide', () => {
-    unsubscribe();
-    fabricHandle.dispose();
-    panelHandle.dispose();
+    unsubscribe?.();
+    fabricHandle?.dispose();
+    panelHandle?.dispose();
     viewport?.dispose();
     viewport = null;
   });
