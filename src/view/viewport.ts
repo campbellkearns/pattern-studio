@@ -357,10 +357,14 @@ export function createViewport(options: ViewportOptions): Viewport {
     y: number;
   }> => {
     const rect = canvas.getBoundingClientRect();
-    const world = new Vector3();
+    const centre = new Vector3();
     return views.map((view) => {
-      view.group.getWorldPosition(world);
-      const ndc = world.clone().project(camera);
+      // Project the piece's bbox centre, not the group origin (which is
+      // the layout slot's min-corner) so taps can aim at the visible body.
+      view.mesh.geometry.computeBoundingBox();
+      view.mesh.geometry.boundingBox?.getCenter(centre);
+      view.mesh.localToWorld(centre);
+      const ndc = centre.project(camera);
       return {
         id: view.id,
         x: rect.left + ((ndc.x + 1) / 2) * rect.width,
