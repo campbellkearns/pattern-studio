@@ -44,9 +44,7 @@ export interface WorkBoxCm {
  * framing. Returns null for an empty project — "no work" means something
  * different to each consumer, so callers decide.
  */
-export function workBoundsCm(
-  boxes: readonly WorkBoxCm[],
-): BoundsCm | null {
+export function workBoundsCm(boxes: readonly WorkBoxCm[]): BoundsCm | null {
   if (boxes.length === 0) return null;
 
   let minX = Infinity;
@@ -75,6 +73,25 @@ export function paperBoundsCm(work: BoundsCm): BoundsCm {
     maxX: work.maxX + PAPER_MARGIN_CM,
     maxY: work.maxY + PAPER_MARGIN_CM,
   };
+}
+
+// --- Overflow state -------------------------------------------------------
+
+/**
+ * True when the work extends beyond any edge of the fixed mat — the paper
+ * roll is carrying the overflow. Drives the camera's auto-fit, which
+ * re-fires only when this state flips (blueprint States table), and reads
+ * the whole mat rect so a single oversized piece counts even when its row
+ * technically started on the mat.
+ */
+export function workOverflowsMat(work: BoundsCm | null): boolean {
+  if (!work) return false;
+  return (
+    work.minX < 0 ||
+    work.minY < 0 ||
+    work.maxX > MAT_WIDTH_CM ||
+    work.maxY > MAT_DEPTH_CM
+  );
 }
 
 // --- Render heights -------------------------------------------------------
