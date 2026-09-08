@@ -7,6 +7,9 @@
  * redraft() semantics per entry:
  * - Notebook holder: the M2 parametric redraft (measurements drive Titan
  *   legs on top of the hand-authored starter — main's behavior, kept).
+ * - Toiletry rollup / Tote: fixed-size starters (the blueprint's starter
+ *   spec defines no dimensions for these rungs) — redraft ignores the
+ *   measurements and returns a fresh copy of the same fixed pieces.
  * - Pants: the full pants set — adapter legs plus the measurement-sized
  *   auxiliaries, so the waistband/fly shield/pocket bag track the panel.
  */
@@ -15,6 +18,8 @@ import type { Piece, Project, StarterProject } from '../model';
 import { redraftPants } from '../engine/titanPants';
 import type { PantMeasurements } from '../engine/titanSettings';
 import { NOTEBOOK_HOLDER_STARTER } from './notebookHolder';
+import { TOILETRY_ROLLUP_STARTER } from './toiletryRollup';
+import { TOTE_STARTER } from './tote';
 import { pantsStarter, redraftPantsStarter } from './pantsStarter';
 
 export interface StarterEntry {
@@ -34,6 +39,18 @@ export const STARTERS: readonly StarterEntry[] = [
     name: 'Notebook holder',
     build: () => createStarterProject(NOTEBOOK_HOLDER_STARTER),
     redraft: (measurements) => redraftPants(measurements),
+  },
+  {
+    id: 'starter-toiletry-rollup',
+    name: 'Toiletry rollup',
+    build: () => createStarterProject(TOILETRY_ROLLUP_STARTER),
+    redraft: () => createStarterProject(TOILETRY_ROLLUP_STARTER).pieces,
+  },
+  {
+    id: 'starter-tote',
+    name: 'Tote',
+    build: () => createStarterProject(TOTE_STARTER),
+    redraft: () => createStarterProject(TOTE_STARTER).pieces,
   },
   {
     id: 'starter-pants',

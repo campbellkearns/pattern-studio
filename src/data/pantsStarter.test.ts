@@ -295,9 +295,11 @@ describe('pants assembly (ordered seam steps)', () => {
 });
 
 describe('starter registry', () => {
-  it('offers the notebook holder and the pants starter in ladder order', () => {
+  it('offers the full starter ladder in difficulty order', () => {
     expect(STARTERS.map((entry) => entry.id)).toEqual([
       'starter-notebook-holder',
+      'starter-toiletry-rollup',
+      'starter-tote',
       'starter-pants',
     ]);
   });
