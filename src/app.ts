@@ -6,6 +6,9 @@
  */
 import { createStarterProject } from './model';
 import { NOTEBOOK_HOLDER_STARTER } from './data/notebookHolder';
+import { TITAN_PANTS_TEMPLATE } from './engine/titanSettings';
+import { redraftPants } from './engine/titanPants';
+import { createMeasurementsPanel } from './view/measurementsPanel';
 import { createPiecePanel } from './view/panel';
 import { supportsWebGL2 } from './view/webgl';
 import { createSelectionStore } from './view/selection';
@@ -65,6 +68,13 @@ export function mountApp(root: HTMLElement): void {
 
   const panel = document.createElement('aside');
   panel.className = 'panel';
+  // Measurements drive the redraft, so the panel leads with them; the
+  // piece list underneath reflects whatever is currently on the mat.
+  const measurementsSection = document.createElement('section');
+  measurementsSection.className = 'panel-section';
+  const piecesSection = document.createElement('section');
+  piecesSection.className = 'panel-section';
+  panel.append(measurementsSection, piecesSection);
 
   layout.append(canvasHolder, panel);
   root.append(layout, status);
@@ -95,9 +105,42 @@ export function mountApp(root: HTMLElement): void {
     return;
   }
 
-  const panelHandle = createPiecePanel(panel, project.pieces, selection, {
-    onPreset: (preset) => viewport?.applyPreset(preset),
-  });
+  // Viewport is proven non-null past the unsupported-device check; a local
+  // alias gives closures a reference TypeScript can verify as non-null.
+  const activeViewport: Viewport = viewport;
+  const panelHandle = createPiecePanel(
+    piecesSection,
+    project.pieces,
+    selection,
+    { onPreset: (preset) => viewport?.applyPreset(preset) },
+  );
+
+  // Live redraft: the panel owns input state, the engine owns drafting,
+  // and this shell owns keeping the viewport and piece list in sync. A
+  // failed draft never reaches the viewport — the last valid pieces stay
+  // on the mat and the panel shows what went wrong (blueprint error state).
+  const measurementsPanel = createMeasurementsPanel(
+    measurementsSection,
+    TITAN_PANTS_TEMPLATE,
+    {
+      onRedraft: (measurements) => {
+        try {
+          const pieces = redraftPants(measurements);
+          activeViewport.updatePieces(pieces);
+          panelHandle.updatePieces(pieces);
+          measurementsPanel.showDraftError(null);
+        } catch (error) {
+          // Never swallow: surface the failure next to the field that
+          // caused it, keeping the last valid draft on the mat.
+          console.error('redraft failed', error);
+          measurementsPanel.showDraftError(
+            'Could not redraft with those measurements — ' +
+              'the last valid pattern is still shown. Adjust and try again.',
+          );
+        }
+      },
+    },
+  );
 
   // Dev-only dogfooding hook (stripped from production builds): lets the
   // automation aim taps at exact piece positions.
@@ -115,6 +158,7 @@ export function mountApp(root: HTMLElement): void {
 
   window.addEventListener('pagehide', () => {
     unsubscribe();
+    measurementsPanel.dispose();
     panelHandle.dispose();
     viewport?.dispose();
     viewport = null;
