@@ -1,0 +1,203 @@
+{
+  "core": "@freesewing/core 4.10.1",
+  "three": "three 185",
+  "model": "cisMaleAdult40 (mm)",
+  "highRise": {
+    "svgBytes": 20213,
+    "svgPath": "/home/user/work/pattern-studio/docs/spike/out/titan-highrise.svg",
+    "svgPathCount": 10,
+    "perPath": [
+      {
+        "pathIndex": 0,
+        "subPaths": 1,
+        "shapes": 1
+      },
+      {
+        "pathIndex": 1,
+        "subPaths": 1,
+        "shapes": 1
+      },
+      {
+        "pathIndex": 2,
+        "subPaths": 1,
+        "shapes": 0
+      },
+      {
+        "pathIndex": 3,
+        "subPaths": 1,
+        "shapes": 1
+      },
+      {
+        "pathIndex": 4,
+        "subPaths": 1,
+        "shapes": 1
+      },
+      {
+        "pathIndex": 5,
+        "subPaths": 26,
+        "shapes": 1
+      },
+      {
+        "pathIndex": 6,
+        "subPaths": 1,
+        "shapes": 1
+      },
+      {
+        "pathIndex": 7,
+        "subPaths": 1,
+        "shapes": 1
+      },
+      {
+        "pathIndex": 8,
+        "subPaths": 1,
+        "shapes": 0
+      },
+      {
+        "pathIndex": 9,
+        "subPaths": 26,
+        "shapes": 1
+      }
+    ],
+    "shapeCount": 8,
+    "holeCount": 50,
+    "pointCount": 1304,
+    "isShape": true,
+    "partData": {
+      "back": {
+        "fork": {
+          "x": -400.185821967548,
+          "y": 359.04
+        },
+        "waistIn": {
+          "x": -193.4765289932732,
+          "y": -40.92043874800362
+        },
+        "waistOut": {
+          "x": 21.099402140161224,
+          "y": -0.8788581320989692
+        },
+        "cbSeat": {
+          "x": -294.78000000000003,
+          "y": 279
+        }
+      },
+      "front": {
+        "fork": {
+          "x": 321.18074340725826,
+          "y": 358.85854999850574
+        },
+        "waistIn": {
+          "x": 198.0319578589354,
+          "y": -23.77059899474807
+        },
+        "waistOut": {
+          "x": -13.83911313354454,
+          "y": -0.18327874637554942
+        },
+        "cfSeat": {
+          "x": 241.74004383011498,
+          "y": 278.8633386999415
+        }
+      }
+    }
+  },
+  "lowRise": {
+    "svgBytes": 20291,
+    "svgPath": "/home/user/work/pattern-studio/docs/spike/out/titan-lowrise.svg",
+    "svgPathCount": 10,
+    "perPath": [
+      {
+        "pathIndex": 0,
+        "subPaths": 1,
+        "shapes": 1
+      },
+      {
+        "pathIndex": 1,
+        "subPaths": 1,
+        "shapes": 1
+      },
+      {
+        "pathIndex": 2,
+        "subPaths": 1,
+        "shapes": 0
+      },
+      {
+        "pathIndex": 3,
+        "subPaths": 1,
+        "shapes": 1
+      },
+      {
+        "pathIndex": 4,
+        "subPaths": 1,
+        "shapes": 1
+      },
+      {
+        "pathIndex": 5,
+        "subPaths": 26,
+        "shapes": 1
+      },
+      {
+        "pathIndex": 6,
+        "subPaths": 1,
+        "shapes": 1
+      },
+      {
+        "pathIndex": 7,
+        "subPaths": 1,
+        "shapes": 1
+      },
+      {
+        "pathIndex": 8,
+        "subPaths": 1,
+        "shapes": 0
+      },
+      {
+        "pathIndex": 9,
+        "subPaths": 26,
+        "shapes": 1
+      }
+    ],
+    "shapeCount": 8,
+    "holeCount": 50,
+    "pointCount": 1316,
+    "isShape": true,
+    "partData": {
+      "back": {
+        "fork": {
+          "x": -391.3259724027624,
+          "y": 387.20000000000005
+        },
+        "waistIn": {
+          "x": -209.7024110933998,
+          "y": -30.527306035533286
+        },
+        "waistOut": {
+          "x": 6.651546572051891,
+          "y": -1.5942211240279107
+        },
+        "cbSeat": {
+          "x": -294.78000000000003,
+          "y": 279
+        }
+      },
+      "front": {
+        "fork": {
+          "x": 308.61117783202144,
+          "y": 386.4425222135182
+        },
+        "waistIn": {
+          "x": 219.4496232783001,
+          "y": -8.627976502316699
+        },
+        "waistOut": {
+          "x": 6.42638936997902,
+          "y": -0.45398021892907536
+        },
+        "cfSeat": {
+          "x": 241.7400094165518,
+          "y": 278.40594697080974
+        }
+      }
+    }
+  }
+}
