@@ -159,12 +159,16 @@ export function createViewport(options: ViewportOptions): Viewport {
   };
 
   const buildPieceViews = (pieces: readonly Piece[]): void => {
+    // Depth-aware layout: rows past the mat's depth budget land on the
+    // paper surface (Placement.surface). Until the paper-roll PR renders
+    // that surface, overflow pieces intentionally sit beyond the mat's
+    // far edge — the honest intermediate state, not a layout regression.
     const placements = layoutOnMat(
       pieces.map((piece) => {
         const e = pieceExtents(piece);
         return { id: piece.id, widthCm: e.width, heightCm: e.height };
       }),
-      { gapCm: 6, matWidthCm: MAT_WIDTH_CM },
+      { gapCm: 6, matWidthCm: MAT_WIDTH_CM, matDepthCm: MAT_DEPTH_CM },
     );
     const placementById = new Map(placements.map((p) => [p.id, p]));
 

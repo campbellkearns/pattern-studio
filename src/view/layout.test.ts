@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { layoutOnMat, placementToWorld } from './layout';
 
 describe('layoutOnMat', () => {
-  const opts = { gapCm: 5, matWidthCm: 100 };
+  const opts = { gapCm: 5, matWidthCm: 100, matDepthCm: 100 };
 
   it('places pieces left to right in input order', () => {
     const result = layoutOnMat(
@@ -13,8 +13,8 @@ describe('layoutOnMat', () => {
       opts,
     );
     expect(result).toEqual([
-      { id: 'a', xCm: 5, yCm: 5 },
-      { id: 'b', xCm: 30, yCm: 5 },
+      { id: 'a', xCm: 5, yCm: 5, surface: 'mat' },
+      { id: 'b', xCm: 30, yCm: 5, surface: 'mat' },
     ]);
   });
 
@@ -29,9 +29,9 @@ describe('layoutOnMat', () => {
     );
     // b would end at 55 + 45 = 100 > 95 usable (mat minus trailing gap) →
     // b starts row 2 and c joins it.
-    expect(result[0]).toEqual({ id: 'a', xCm: 5, yCm: 5 });
-    expect(result[1]).toEqual({ id: 'b', xCm: 5, yCm: 20 });
-    expect(result[2]).toEqual({ id: 'c', xCm: 55, yCm: 20 });
+    expect(result[0]).toEqual({ id: 'a', xCm: 5, yCm: 5, surface: 'mat' });
+    expect(result[1]).toEqual({ id: 'b', xCm: 5, yCm: 20, surface: 'mat' });
+    expect(result[2]).toEqual({ id: 'c', xCm: 55, yCm: 20, surface: 'mat' });
   });
 
   it('never overlaps pieces and keeps everything within mat bounds', () => {
@@ -79,7 +79,7 @@ describe('placementToWorld', () => {
 
   it('maps the mat centre onto the world origin', () => {
     const world = placementToWorld(
-      { id: 'a', xCm: MAT_W / 2, yCm: MAT_D / 2 },
+      { id: 'a', xCm: MAT_W / 2, yCm: MAT_D / 2, surface: 'mat' },
       MAT_W,
       MAT_D,
     );
@@ -88,7 +88,11 @@ describe('placementToWorld', () => {
   });
 
   it('maps the mat top-left corner to (−width/2, +depth/2)', () => {
-    const world = placementToWorld({ id: 'a', xCm: 0, yCm: 0 }, MAT_W, MAT_D);
+    const world = placementToWorld(
+      { id: 'a', xCm: 0, yCm: 0, surface: 'mat' },
+      MAT_W,
+      MAT_D,
+    );
     expect(world.xCm).toBe(-75);
     expect(world.zCm).toBe(50);
   });
@@ -100,7 +104,7 @@ describe('placementToWorld', () => {
         { id: 'flap', widthCm: 40, heightCm: 14 },
         { id: 'pocket', widthCm: 18, heightCm: 12 },
       ],
-      { gapCm: 6, matWidthCm: MAT_W },
+      { gapCm: 6, matWidthCm: MAT_W, matDepthCm: MAT_D },
     );
     for (const p of placements) {
       const w = placementToWorld(p, MAT_W, MAT_D);
