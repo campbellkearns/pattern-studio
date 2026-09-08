@@ -16,6 +16,7 @@ import {
   serializeProject,
 } from './io/projectIo';
 import { copyTextToClipboard } from './io/clipboardIo';
+import { exportPiecesSvg } from './io/svgExport';
 import { downloadTextFile, pickJsonText } from './io/fileIo';
 import {
   MAX_SHARE_URL_LENGTH,
@@ -286,6 +287,19 @@ export function mountApp(root: HTMLElement): void {
       narrate(`Exported '${currentProject.name}' as JSON.`);
     } catch (error) {
       narrate(`Export failed (${errorMessage(error)}).`);
+    }
+  });
+
+  addButton('Export SVG', () => {
+    try {
+      downloadTextFile(
+        `${slugify(currentProject.name)}.pattern.svg`,
+        exportPiecesSvg(currentProject),
+        'image/svg+xml',
+      );
+      narrate("Exported SVG — print at 100% scale (no 'fit to page').");
+    } catch (error) {
+      narrate(`SVG export failed (${errorMessage(error)}).`);
     }
   });
 
