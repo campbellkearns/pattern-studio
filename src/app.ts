@@ -6,6 +6,7 @@
  */
 import { createStarterProject } from './model';
 import { NOTEBOOK_HOLDER_STARTER } from './data/notebookHolder';
+import { createFabricPanel } from './view/fabricPanel';
 import { createPiecePanel } from './view/panel';
 import { supportsWebGL2 } from './view/webgl';
 import { createSelectionStore } from './view/selection';
@@ -99,6 +100,15 @@ export function mountApp(root: HTMLElement): void {
     onPreset: (preset) => viewport?.applyPreset(preset),
   });
 
+  // Fabric panel below the piece list: weave / scale / colour / stripe
+  // pickers that re-skin every piece live through the viewport.
+  const fabricSection = document.createElement('section');
+  fabricSection.className = 'fabric-panel';
+  panel.appendChild(fabricSection);
+  const fabricHandle = createFabricPanel(fabricSection, project.fabric, {
+    onFabricChange: (spec) => viewport?.applyFabric(spec),
+  });
+
   // Dev-only dogfooding hook (stripped from production builds): lets the
   // automation aim taps at exact piece positions.
   if (import.meta.env.DEV) {
@@ -115,6 +125,7 @@ export function mountApp(root: HTMLElement): void {
 
   window.addEventListener('pagehide', () => {
     unsubscribe();
+    fabricHandle.dispose();
     panelHandle.dispose();
     viewport?.dispose();
     viewport = null;

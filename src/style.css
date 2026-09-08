@@ -145,6 +145,59 @@ body {
   font-size: 0.8rem;
 }
 
+/* --- Fabric panel ---------------------------------------------------------- */
+
+.fabric-group {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fabric-label {
+  color: var(--ink-dim);
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+}
+
+.fabric-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fabric-btn {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.fabric-btn:active {
+  border-color: var(--accent);
+}
+
+.fabric-btn.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-raised));
+}
+
+.fabric-color {
+  width: 64px;
+  height: 44px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  cursor: pointer;
+}
+
 /* --- Status bar ---------------------------------------------------------- */
 
 .status-bar {
