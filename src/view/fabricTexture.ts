@@ -19,7 +19,7 @@
  * plain (1×1 interlace), 2/2 twill (diagonal), 5-end satin (long weft
  * floats — the lustrous one).
  */
-import { CanvasTexture, RepeatWrapping, SRGBColorSpace } from 'three';
+import { CanvasTexture, RepeatWrapping } from 'three';
 import type { FabricSpec, WeaveType } from '../model';
 
 /** Fundamental interlace period in threads per axis, per weave. */
@@ -83,6 +83,29 @@ export function shade(color: Rgb, k: number): Rgb {
 
 export function rgbCss(color: Rgb): string {
   return `rgb(${color.r}, ${color.g}, ${color.b})`;
+}
+
+/**
+ * sRGB → linear-light per channel (exact IEC transfer). The colour map is
+ * uploaded as a plain linear RGBA texture (no SRGBColorSpace): SwiftShader
+ * (Chrome 153 headless, iPad-class GPUs) renders a sRGB-flagged CanvasTexture
+ * to zero pixels on MeshPhysicalMaterial, so paint the canvas in linear-light
+ * bytes instead and let the renderer's sRGB output transform handle the rest —
+ * colorimetrically identical on GPUs that do support the sRGB flag.
+ */
+export function srgbToLinear(color: Rgb): Rgb {
+  const channel = (u: number): number => {
+    const c = u / 255;
+    const linear =
+      c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    return Math.round(linear * 255);
+  };
+  return { r: channel(color.r), g: channel(color.g), b: channel(color.b) };
+}
+
+/** CSS fill colour in linear-light bytes, for the linear colour-map canvas. */
+function rgbCssLinear(color: Rgb): string {
+  return rgbCss(srgbToLinear(color));
 }
 
 /**
@@ -338,7 +361,7 @@ export function createFabricTextures(spec: FabricSpec): FabricTextures {
   const paintColorMap = (layout: WeaveLayout): void => {
     const { sizePx, threadPx, threadsAcross, warpUp, stripeRows } = layout;
     const stripeSet = new Set(stripeRows);
-    mapCtx.fillStyle = rgbCss(layout.base);
+    mapCtx.fillStyle = rgbCssLinear(layout.base);
     mapCtx.fillRect(0, 0, sizePx, sizePx);
 
     for (let row = 0; row < threadsAcross; row++) {
@@ -363,9 +386,9 @@ export function createFabricTextures(spec: FabricSpec): FabricTextures {
               (col + 1) * threadPx,
               0,
             );
-        grad.addColorStop(0, rgbCss(edge));
-        grad.addColorStop(0.5, rgbCss(centre));
-        grad.addColorStop(1, rgbCss(edge));
+        grad.addColorStop(0, rgbCssLinear(edge));
+        grad.addColorStop(0.5, rgbCssLinear(centre));
+        grad.addColorStop(1, rgbCssLinear(edge));
         mapCtx.fillStyle = grad;
 
         // Slight overscan so consecutive segments of one thread fuse.
@@ -396,7 +419,8 @@ export function createFabricTextures(spec: FabricSpec): FabricTextures {
   };
 
   const map = new CanvasTexture(mapCanvas);
-  map.colorSpace = SRGBColorSpace;
+  // Linear texture: the canvas already stores linear-light bytes (see
+  // srgbToLinear) — the sRGB flag itself renders to zero pixels on SwiftShader.
   const normalMap = new CanvasTexture(normalCanvas);
   const roughnessMap = new CanvasTexture(roughnessCanvas);
   for (const texture of [map, normalMap, roughnessMap]) {

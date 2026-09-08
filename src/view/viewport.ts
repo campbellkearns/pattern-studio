@@ -179,9 +179,10 @@ export function createViewport(options: ViewportOptions): Viewport {
         0.55,
       ),
       // Push the fill behind its outline edges so the cutting line reads.
-      polygonOffset: true,
-      polygonOffsetFactor: 1,
-      polygonOffsetUnits: 1,
+      // No polygonOffset: on SwiftShader (Chrome 153 headless, iPad-class
+      // GPUs) a textured MeshPhysicalMaterial with polygonOffset factor/units
+      // 1 rasterizes to zero pixels — pieces vanish entirely. PIECE_LIFT_CM
+      // already separates pieces from the mat, so the offset is redundant.
     });
     const mesh = new Mesh(outlineGeometry, material);
     mesh.castShadow = true;
