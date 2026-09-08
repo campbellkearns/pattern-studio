@@ -1,3 +1,6 @@
 package-lock.json
 dist/
 coverage/
+
+# Generated spike artifacts are evidence — never reformat them.
+docs/spike/out/

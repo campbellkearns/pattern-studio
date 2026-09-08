@@ -1,59 +1,209 @@
 :root {
-  color-scheme: light;
+  --bg: #191d21;
+  --surface: #23282e;
+  --surface-raised: #2c333b;
+  --line: #3a434d;
+  --ink: #e8edf2;
+  --ink-dim: #9aa8b5;
+  --accent: #ffd166;
   font-family:
+    'Avenir Next',
+    'Segoe UI',
     system-ui,
     -apple-system,
-    'Segoe UI',
-    Roboto,
     sans-serif;
-  line-height: 1.6;
+  color-scheme: dark;
 }
 
 * {
   box-sizing: border-box;
 }
 
+html,
 body {
   margin: 0;
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  background: #f4f1ea;
-  color: #24303c;
+  height: 100%;
 }
 
-.shell {
-  max-width: 40rem;
-  margin: 2rem;
-  padding: 3rem 2.5rem;
-  background: #ffffff;
-  border: 1px solid #e3ddd0;
-  border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(36, 48, 60, 0.08);
+body {
+  background: var(--bg);
+  color: var(--ink);
+  overflow: hidden;
 }
 
-.eyebrow {
-  margin: 0 0 0.25rem;
-  font-size: 0.8rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #8a7f6c;
+#app {
+  height: 100%;
 }
 
-h1 {
-  margin: 0 0 0.75rem;
-  font-size: 2rem;
+.app-layout {
+  display: flex;
+  height: 100%;
 }
 
-.lede {
-  margin: 0 0 1.5rem;
-  color: #4b5a68;
+/* --- Viewport ---------------------------------------------------------- */
+
+.viewport-holder {
+  flex: 1;
+  min-width: 0;
+  position: relative;
 }
 
-.meta {
+.viewport-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* Blueprint input model: the canvas owns every gesture — no browser
+     scroll/zoom interference, mouse pen and touch alike. */
+  touch-action: none;
+  outline: none;
+}
+
+/* --- Piece panel -------------------------------------------------------- */
+
+.panel {
+  width: 280px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.panel-header h2 {
   margin: 0;
-  padding-top: 1rem;
-  border-top: 1px solid #eee7da;
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+}
+
+.presets {
+  display: flex;
+  gap: 6px;
+}
+
+.preset-btn {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  font: inherit;
   font-size: 0.85rem;
-  color: #8a7f6c;
+  cursor: pointer;
+}
+
+.preset-btn:active {
+  border-color: var(--accent);
+}
+
+.piece-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.piece-btn {
+  width: 100%;
+  min-height: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.piece-btn.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-raised));
+}
+
+.piece-name {
+  font-weight: 600;
+}
+
+.piece-meta {
+  color: var(--ink-dim);
+  font-size: 0.8rem;
+}
+
+/* --- Status bar ---------------------------------------------------------- */
+
+.status-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  max-width: min(90vw, 560px);
+  padding: 10px 18px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(6px);
+  font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+/* --- Unsupported devices -------------------------------------------------- */
+
+.unsupported {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+}
+
+.unsupported h2 {
+  margin: 0;
+}
+
+.unsupported p {
+  margin: 0;
+  max-width: 40ch;
+  color: var(--ink-dim);
+  line-height: 1.5;
+}
+
+/* --- Narrow tablets: panel below instead of stealing width ---------------- */
+
+@media (max-width: 720px) {
+  .app-layout {
+    flex-direction: column-reverse;
+  }
+
+  .panel {
+    width: 100%;
+    height: 38%;
+    border-left: none;
+    border-top: 1px solid var(--line);
+  }
+
+  .status-bar {
+    bottom: 12px;
+  }
 }
