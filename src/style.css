@@ -313,3 +313,113 @@ body {
     bottom: 12px;
   }
 }
+
+/* --- Measurements panel (parametric redraft) ----------------------------- */
+
+.panel-section + .panel-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.measurements-hint {
+  margin: -8px 0 12px;
+  font-size: 0.8rem;
+  color: var(--ink-dim);
+}
+
+.measurement-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.measurement-field {
+  display: grid;
+  grid-template-columns: 1fr 76px 24px;
+  grid-template-areas:
+    'label input unit'
+    'explainer explainer explainer';
+  align-items: center;
+  gap: 2px 6px;
+  cursor: pointer;
+}
+
+.measurement-label {
+  grid-area: label;
+  font-size: 0.9rem;
+}
+
+.measurement-unit {
+  grid-area: unit;
+  font-size: 0.8rem;
+  color: var(--ink-dim);
+}
+
+.measurement-field input {
+  grid-area: input;
+  min-height: 44px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.9rem;
+  text-align: right;
+}
+
+.measurement-field input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Off-happy-path: a field mid-edit or holding junk is flagged, and the
+   last valid draft stays on the mat until the value recovers. */
+.measurement-field.invalid input,
+.measurement-field input[aria-invalid='true'] {
+  border-color: #e5484d;
+}
+
+.measurement-explainer {
+  grid-area: explainer;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--ink-dim);
+}
+
+.measurement-controls {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.reset-btn {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.reset-btn:hover {
+  border-color: var(--accent);
+}
+
+.draft-error {
+  margin: 10px 0 0;
+  padding: 10px;
+  border: 1px solid #e5484d;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: #f2a0a3;
+}
+
+.draft-error[hidden] {
+  display: none;
+}

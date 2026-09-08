@@ -30,7 +30,7 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three';
-import type { FabricSpec, Project } from '../model';
+import type { FabricSpec, Piece, Project } from '../model';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { createFabricTextures, roughnessFor } from './fabricTexture';
 import { layoutOnMat, placementToWorld } from './layout';
@@ -58,6 +58,8 @@ export interface Viewport {
   applyPreset(preset: CameraPreset): void;
   /** Re-skin every piece with a new fabric spec, live. */
   applyFabric(spec: FabricSpec): void;
+  /** Replace the rendered pieces (parametric redraft); layout recomputes. */
+  updatePieces(pieces: readonly Piece[]): void;
   /** Dev/dogfood aid: each piece's centre in client coordinates. */
   pieceScreenPositions(): Array<{ id: string; x: number; y: number }>;
   dispose(): void;
@@ -130,104 +132,129 @@ export function createViewport(options: ViewportOptions): Viewport {
   const piecesGroup = new Group();
   scene.add(piecesGroup);
 
-  const placements = layoutOnMat(
-    project.pieces.map((piece) => {
-      const e = pieceExtents(piece);
-      return { id: piece.id, widthCm: e.width, heightCm: e.height };
-    }),
-    { gapCm: 6, matWidthCm: MAT_WIDTH_CM },
-  );
-  const placementById = new Map(placements.map((p) => [p.id, p]));
-
-  const views: PieceView[] = [];
-  const meshes: Mesh[] = [];
-  const disposables: { dispose(): void }[] = [
-    matGeometry,
-    matMaterial,
-    matTexture,
-  ];
-
   // One shared weave texture set serves every piece: each piece's UVs are
   // rotated to its own grainline (below), so per-piece texture clones are
   // unnecessary — and a fabric swap repaints three canvases once.
-  const fabricTextures = createFabricTextures(project.fabric);
-  disposables.push(fabricTextures);
+  // Live fabric spec: applyFabric updates this so a later redraft rebuild
+  // (updatePieces) re-skins new meshes with the CURRENT fabric, not the
+  // project's original one. Project.fabric is readonly by design.
+  let currentFabric: FabricSpec = project.fabric;
+  const fabricTextures = createFabricTextures(currentFabric);
 
-  for (const piece of project.pieces) {
-    const extents = pieceExtents(piece);
-    const outlineGeometry = pieceOutlineGeometry(piece);
-    // Weave and stripes run true to this piece's grain (the grainline lock).
-    applyGrainlineUVs(outlineGeometry, piece);
-    // Move the bbox min-corner to the origin so placement positions the
-    // piece by its layout slot, then lay it flat on the mat (XY → XZ).
-    outlineGeometry.translate(-extents.minX, -extents.minY, 0);
-    outlineGeometry.rotateX(-Math.PI / 2);
+  const sharedDisposables: { dispose(): void }[] = [
+    matGeometry,
+    matMaterial,
+    matTexture,
+    fabricTextures,
+  ];
+  let pieceDisposables: { dispose(): void }[] = [];
+  let views: PieceView[] = [];
+  let meshes: Mesh[] = [];
 
-    const material = new MeshPhysicalMaterial({
-      map: fabricTextures.map,
-      normalMap: fabricTextures.normalMap,
-      roughnessMap: fabricTextures.roughnessMap,
-      color: project.fabric.color,
-      roughness: roughnessFor(project.fabric.weave),
-      metalness: 0,
-      // Cloth response: sheen is the three.js material feature built for
-      // fabric (findings log §2); tint follows the fabric color, lightened.
-      sheen: 0.5,
-      sheenRoughness: 0.55,
-      sheenColor: new Color(project.fabric.color).lerp(
-        new Color('#ffffff'),
-        0.55,
-      ),
-      // Push the fill behind its outline edges so the cutting line reads.
-      // No polygonOffset: on SwiftShader (Chrome 153 headless, iPad-class
-      // GPUs) a textured MeshPhysicalMaterial with polygonOffset factor/units
-      // 1 rasterizes to zero pixels — pieces vanish entirely. PIECE_LIFT_CM
-      // already separates pieces from the mat, so the offset is redundant.
-    });
-    const mesh = new Mesh(outlineGeometry, material);
-    mesh.castShadow = true;
-    mesh.userData.pieceId = piece.id;
+  /** Remove every piece view, freeing only the per-piece GPU resources. */
+  const clearPieceViews = (): void => {
+    for (const view of views) piecesGroup.remove(view.group);
+    for (const d of pieceDisposables) d.dispose();
+    pieceDisposables = [];
+    views = [];
+    meshes = [];
+  };
 
-    const edgeGeometry = new EdgesGeometry(outlineGeometry, 10);
-    const baseOutline = new LineSegments(
-      edgeGeometry,
-      new LineBasicMaterial({ color: '#1c242b' }),
+  const buildPieceViews = (pieces: readonly Piece[]): void => {
+    const placements = layoutOnMat(
+      pieces.map((piece) => {
+        const e = pieceExtents(piece);
+        return { id: piece.id, widthCm: e.width, heightCm: e.height };
+      }),
+      { gapCm: 6, matWidthCm: MAT_WIDTH_CM },
     );
-    const highlight = new LineSegments(
-      edgeGeometry,
-      new LineBasicMaterial({ color: '#ffd166' }),
-    );
-    highlight.visible = false;
+    const placementById = new Map(placements.map((p) => [p.id, p]));
 
-    const marks = new LineSegments(
-      marksGeometry(piece.internal),
-      new LineBasicMaterial({ color: '#24303a' }),
-    );
-    marks.position.y = MARKS_LIFT_CM;
+    for (const piece of pieces) {
+      const extents = pieceExtents(piece);
+      const outlineGeometry = pieceOutlineGeometry(piece);
+      // Weave and stripes run true to this piece's grain (the grainline lock).
+      applyGrainlineUVs(outlineGeometry, piece);
+      // Move the bbox min-corner to the origin so placement positions the
+      // piece by its layout slot, then lay it flat on the mat (XY → XZ).
+      outlineGeometry.translate(-extents.minX, -extents.minY, 0);
+      outlineGeometry.rotateX(-Math.PI / 2);
 
-    const group = new Group();
-    const placement = placementById.get(piece.id);
-    if (!placement) throw new Error(`no layout for piece ${piece.id}`);
-    // Mat-space placements are 0-based; the mat mesh is centred on the
-    // origin, so the placement must be re-centred or pieces hang off the
-    // mat's right edge.
-    const world = placementToWorld(placement, MAT_WIDTH_CM, MAT_DEPTH_CM);
-    group.position.set(world.xCm, PIECE_LIFT_CM, world.zCm);
-    group.add(mesh, baseOutline, highlight, marks);
-    piecesGroup.add(group);
+      const material = new MeshPhysicalMaterial({
+        map: fabricTextures.map,
+        normalMap: fabricTextures.normalMap,
+        roughnessMap: fabricTextures.roughnessMap,
+        color: currentFabric.color,
+        roughness: roughnessFor(currentFabric.weave),
+        metalness: 0,
+        // Cloth response: sheen is the three.js material feature built for
+        // fabric (findings log §2); tint follows the fabric color, lightened.
+        sheen: 0.5,
+        sheenRoughness: 0.55,
+        sheenColor: new Color(currentFabric.color).lerp(
+          new Color('#ffffff'),
+          0.55,
+        ),
+        // No polygonOffset: on SwiftShader (Chrome 153 headless, iPad-class
+        // GPUs) a textured MeshPhysicalMaterial with polygonOffset factor/units
+        // 1 rasterizes to zero pixels — pieces vanish entirely. PIECE_LIFT_CM
+        // already separates pieces from the mat, so the offset is redundant.
+      });
+      const mesh = new Mesh(outlineGeometry, material);
+      mesh.castShadow = true;
+      mesh.userData.pieceId = piece.id;
 
-    views.push({ id: piece.id, group, mesh, material, highlight });
-    meshes.push(mesh);
-    disposables.push(
-      outlineGeometry,
-      material,
-      edgeGeometry,
-      baseOutline.material as LineBasicMaterial,
-      highlight.material as LineBasicMaterial,
-      marks.geometry,
-      marks.material as LineBasicMaterial,
-    );
-  }
+      const edgeGeometry = new EdgesGeometry(outlineGeometry, 10);
+      const baseOutline = new LineSegments(
+        edgeGeometry,
+        new LineBasicMaterial({ color: '#1c242b' }),
+      );
+      const highlight = new LineSegments(
+        edgeGeometry,
+        new LineBasicMaterial({ color: '#ffd166' }),
+      );
+      highlight.visible = false;
+
+      const marks = new LineSegments(
+        marksGeometry(piece.internal),
+        new LineBasicMaterial({ color: '#24303a' }),
+      );
+      marks.position.y = MARKS_LIFT_CM;
+
+      const group = new Group();
+      const placement = placementById.get(piece.id);
+      if (!placement) throw new Error(`no layout for piece ${piece.id}`);
+      // Mat-space placements are 0-based; the mat mesh is centred on the
+      // origin, so the placement must be re-centred or pieces hang off
+      // the mat's right edge.
+      const world = placementToWorld(placement, MAT_WIDTH_CM, MAT_DEPTH_CM);
+      group.position.set(world.xCm, PIECE_LIFT_CM, world.zCm);
+      group.add(mesh, baseOutline, highlight, marks);
+      piecesGroup.add(group);
+
+      views.push({ id: piece.id, group, mesh, material, highlight });
+      meshes.push(mesh);
+      pieceDisposables.push(
+        outlineGeometry,
+        material,
+        edgeGeometry,
+        baseOutline.material as LineBasicMaterial,
+        highlight.material as LineBasicMaterial,
+        marks.geometry,
+        marks.material as LineBasicMaterial,
+      );
+    }
+  };
+
+  buildPieceViews(project.pieces);
+
+  const updatePieces = (pieces: readonly Piece[]): void => {
+    clearPieceViews();
+    buildPieceViews(pieces);
+    // A redrafted piece set can drop ids the selection/hover still name.
+    setHover(null);
+    refreshVisuals();
+  };
 
   // --- Camera + controls (native touch map, set explicitly) --------------
   const controls = new OrbitControls(camera, canvas);
@@ -251,6 +278,7 @@ export function createViewport(options: ViewportOptions): Viewport {
 
   // --- Live fabric swap: one repaint, every piece re-skinned -------------
   const applyFabric = (spec: FabricSpec): void => {
+    currentFabric = spec;
     fabricTextures.update(spec);
     const tint = new Color(spec.color).lerp(new Color('#ffffff'), 0.55);
     for (const view of views) {
@@ -383,7 +411,8 @@ export function createViewport(options: ViewportOptions): Viewport {
     canvas.removeEventListener('pointerdown', onPointerDown);
     canvas.removeEventListener('pointerup', onPointerUp);
     canvas.removeEventListener('pointercancel', onPointerCancel);
-    for (const d of disposables) d.dispose();
+    for (const d of sharedDisposables) d.dispose();
+    for (const d of pieceDisposables) d.dispose();
     renderer.dispose();
   };
 
@@ -409,5 +438,5 @@ export function createViewport(options: ViewportOptions): Viewport {
     });
   };
 
-  return { applyPreset, applyFabric, pieceScreenPositions, dispose };
+  return { applyPreset, applyFabric, updatePieces, pieceScreenPositions, dispose };
 }

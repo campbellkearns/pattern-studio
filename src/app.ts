@@ -5,6 +5,9 @@
  * selection without relying on hover. The toolbar (F7, projects as data)
  * carries localStorage save/load and JSON import/export; every persistence
  * outcome — including failures — is narrated in the status bar, never silent.
+ * The measurements panel drives the M2 parametric redraft: a measurement
+ * change redrafts the pieces live, and a failed draft keeps the last valid
+ * pattern on the mat.
  */
 import { createStarterProject } from './model';
 import type { Project } from './model';
@@ -25,7 +28,11 @@ import {
   readShareToken,
 } from './io/shareLink';
 import { createFabricPanel } from './view/fabricPanel';
+import { TITAN_PANTS_TEMPLATE } from './engine/titanSettings';
+import { redraftPants } from './engine/titanPants';
+import { createMeasurementsPanel } from './view/measurementsPanel';
 import { createPiecePanel } from './view/panel';
+import type { PanelHandle } from './view/panel';
 import { supportsWebGL2 } from './view/webgl';
 import { createSelectionStore } from './view/selection';
 import { createViewport } from './view/viewport';
@@ -147,14 +154,17 @@ export function mountApp(root: HTMLElement): void {
 
   const panel = document.createElement('aside');
   panel.className = 'panel';
-  // The piece list owns this subtree (createPiecePanel clears it per
-  // mount); the fabric panel lives beside it and survives re-mounts.
-  const panelBody = document.createElement('div');
-  panelBody.className = 'panel-body';
-  panel.appendChild(panelBody);
+  // Measurements drive the redraft, so the panel leads with them; the
+  // piece list underneath reflects whatever is currently on the mat, and
+  // the fabric panel beside them survives piece-list re-mounts (it is
+  // re-created per project load, not cleared by the piece list).
+  const measurementsSection = document.createElement('section');
+  measurementsSection.className = 'panel-section';
+  const piecesSection = document.createElement('section');
+  piecesSection.className = 'panel-section';
   const fabricSection = document.createElement('section');
   fabricSection.className = 'fabric-panel';
-  panel.appendChild(fabricSection);
+  panel.append(measurementsSection, piecesSection, fabricSection);
   layout.append(canvasHolder, panel);
 
   const status = document.createElement('div');
@@ -171,7 +181,7 @@ export function mountApp(root: HTMLElement): void {
   const selection = createSelectionStore();
   let currentProject: Project = startup.project;
   let viewport: Viewport | null = null;
-  let panelHandle: { dispose(): void } | null = null;
+  let panelHandle: PanelHandle | null = null;
   let fabricHandle: { dispose(): void } | null = null;
   let unsubscribe: (() => void) | null = null;
 
@@ -217,7 +227,7 @@ export function mountApp(root: HTMLElement): void {
       renderUnsupported(root);
       return;
     }
-    panelHandle = createPiecePanel(panelBody, project.pieces, selection, {
+    panelHandle = createPiecePanel(piecesSection, project.pieces, selection, {
       onPreset: (preset) => viewport?.applyPreset(preset),
     });
     // Fabric panel: weave / scale / colour / stripe pickers that re-skin
@@ -237,6 +247,37 @@ export function mountApp(root: HTMLElement): void {
 
   mountProject(startup.project);
   narrate(startup.message);
+
+  // --- Measurements (M2: live parametric redraft) --------------------------
+  // The panel owns input state and the engine owns drafting; this shell
+  // keeps the viewport, piece list, and live project in sync. A failed
+  // draft never reaches the mat — the last valid pieces stay and the
+  // panel surfaces what went wrong (blueprint error state).
+  const measurementsPanel = createMeasurementsPanel(
+    measurementsSection,
+    TITAN_PANTS_TEMPLATE,
+    {
+      onRedraft: (measurements) => {
+        try {
+          const pieces = redraftPants(measurements);
+          // The redraft edits the live project's pieces, so Save/Export
+          // capture what is on the mat.
+          currentProject = { ...currentProject, pieces };
+          viewport?.updatePieces(pieces);
+          panelHandle?.updatePieces(pieces);
+          measurementsPanel.showDraftError(null);
+        } catch (error) {
+          // Never swallow: surface the failure next to the fields,
+          // keeping the last valid draft on the mat.
+          console.error('redraft failed', error);
+          measurementsPanel.showDraftError(
+            'Could not redraft with those measurements — ' +
+              'the last valid pattern is still shown. Adjust and try again.',
+          );
+        }
+      },
+    },
+  );
 
   // --- Toolbar (F7: projects as data) -------------------------------------
   const addButton = (label: string, onClick: () => void): void => {
@@ -352,6 +393,7 @@ export function mountApp(root: HTMLElement): void {
   window.addEventListener('pagehide', () => {
     unsubscribe?.();
     fabricHandle?.dispose();
+    measurementsPanel.dispose();
     panelHandle?.dispose();
     viewport?.dispose();
     viewport = null;
