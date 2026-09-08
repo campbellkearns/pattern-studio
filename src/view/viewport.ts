@@ -19,10 +19,8 @@ import {
   LineSegments,
   Mesh,
   MeshPhysicalMaterial,
-  MeshStandardMaterial,
   PCFSoftShadowMap,
   PerspectiveCamera,
-  PlaneGeometry,
   Raycaster,
   Scene,
   TOUCH,
@@ -34,8 +32,14 @@ import type { FabricSpec, Piece, Project } from '../model';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { createFabricTextures, roughnessFor } from './fabricTexture';
 import { layoutOnMat, placementToWorld } from './layout';
-import { createMatTexture } from './matTexture';
-import { MAT_DEPTH_CM, MAT_TILE_CM, MAT_WIDTH_CM } from './matSurface';
+import {
+  MAT_DEPTH_CM,
+  MAT_WIDTH_CM,
+  paperSurfaceExtentCm,
+  surfaceHeightCm,
+  workBoundsCm,
+} from './matSurface';
+import { createSurfaceMeshes } from './surfaceMeshes';
 import {
   applyGrainlineUVs,
   marksGeometry,
@@ -112,19 +116,9 @@ export function createViewport(options: ViewportOptions): Viewport {
   sun.shadow.camera.far = 500;
   scene.add(sun);
 
-  // --- Cutting mat (true cm grid) ---------------------------------------
-  const matGeometry = new PlaneGeometry(MAT_WIDTH_CM, MAT_DEPTH_CM);
-  const matTexture = createMatTexture();
-  matTexture.repeat.set(MAT_WIDTH_CM / MAT_TILE_CM, MAT_DEPTH_CM / MAT_TILE_CM);
-  const matMaterial = new MeshStandardMaterial({
-    map: matTexture,
-    roughness: 0.95,
-    metalness: 0,
-  });
-  const mat = new Mesh(matGeometry, matMaterial);
-  mat.rotation.x = -Math.PI / 2;
-  mat.receiveShadow = true;
-  scene.add(mat);
+  // --- Surfaces: fixed reference mat + paper roll (shared module) ---------
+  const surfaces = createSurfaceMeshes();
+  scene.add(surfaces.group);
 
   // --- Pieces at true scale ---------------------------------------------
   const piecesGroup = new Group();
@@ -140,9 +134,7 @@ export function createViewport(options: ViewportOptions): Viewport {
   const fabricTextures = createFabricTextures(currentFabric);
 
   const sharedDisposables: { dispose(): void }[] = [
-    matGeometry,
-    matMaterial,
-    matTexture,
+    surfaces,
     fabricTextures,
   ];
   let pieceDisposables: { dispose(): void }[] = [];
@@ -160,9 +152,8 @@ export function createViewport(options: ViewportOptions): Viewport {
 
   const buildPieceViews = (pieces: readonly Piece[]): void => {
     // Depth-aware layout: rows past the mat's depth budget land on the
-    // paper surface (Placement.surface). Until the paper-roll PR renders
-    // that surface, overflow pieces intentionally sit beyond the mat's
-    // far edge — the honest intermediate state, not a layout regression.
+    // paper surface (Placement.surface), which the shared surface module
+    // renders beyond the mat's far edge.
     const placements = layoutOnMat(
       pieces.map((piece) => {
         const e = pieceExtents(piece);
@@ -171,6 +162,21 @@ export function createViewport(options: ViewportOptions): Viewport {
       { gapCm: 6, matWidthCm: MAT_WIDTH_CM, matDepthCm: MAT_DEPTH_CM },
     );
     const placementById = new Map(placements.map((p) => [p.id, p]));
+
+    // The paper roll tracks the placed work: overflow rows extend it, and
+    // a minimal apron shows when everything fits on the mat.
+    const placedBoxes = pieces.map((piece) => {
+      const placement = placementById.get(piece.id);
+      if (!placement) throw new Error(`no layout for piece ${piece.id}`);
+      const e = pieceExtents(piece);
+      return {
+        xCm: placement.xCm,
+        yCm: placement.yCm,
+        widthCm: e.width,
+        heightCm: e.height,
+      };
+    });
+    surfaces.setPaperExtent(paperSurfaceExtentCm(workBoundsCm(placedBoxes)));
 
     for (const piece of pieces) {
       const extents = pieceExtents(piece);
@@ -230,7 +236,11 @@ export function createViewport(options: ViewportOptions): Viewport {
       // origin, so the placement must be re-centred or pieces hang off
       // the mat's right edge.
       const world = placementToWorld(placement, MAT_WIDTH_CM, MAT_DEPTH_CM);
-      group.position.set(world.xCm, PIECE_LIFT_CM, world.zCm);
+      group.position.set(
+        world.xCm,
+        surfaceHeightCm(placement.surface) + PIECE_LIFT_CM,
+        world.zCm,
+      );
       group.add(mesh, baseOutline, highlight, marks);
       piecesGroup.add(group);
 
