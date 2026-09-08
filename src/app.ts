@@ -12,6 +12,16 @@ import { createSelectionStore } from './view/selection';
 import { createViewport } from './view/viewport';
 import type { Viewport } from './view/viewport';
 
+// Dev-only dogfooding hook: lets the automation compute exact on-screen
+// piece positions for tap aiming. Stripped from production builds.
+declare global {
+  interface Window {
+    __patternStudioDebug?: {
+      pieceScreenPositions: () => Array<{ id: string; x: number; y: number }>;
+    };
+  }
+}
+
 function renderUnsupported(container: HTMLElement): void {
   container.innerHTML = '';
   const notice = document.createElement('div');
@@ -88,6 +98,14 @@ export function mountApp(root: HTMLElement): void {
   const panelHandle = createPiecePanel(panel, project.pieces, selection, {
     onPreset: (preset) => viewport?.applyPreset(preset),
   });
+
+  // Dev-only dogfooding hook (stripped from production builds): lets the
+  // automation aim taps at exact piece positions.
+  if (import.meta.env.DEV) {
+    window.__patternStudioDebug = {
+      pieceScreenPositions: () => viewport?.pieceScreenPositions() ?? [],
+    };
+  }
 
   const renderStatus = (id: string | null): void => {
     status.textContent = statusFor(id);

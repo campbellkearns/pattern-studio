@@ -26,11 +26,12 @@ import {
   Scene,
   TOUCH,
   Vector2,
+  Vector3,
   WebGLRenderer,
 } from 'three';
 import type { Project } from '../model';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { layoutOnMat } from './layout';
+import { layoutOnMat, placementToWorld } from './layout';
 import { createMatTexture, MAT_TILE_CM } from './matTexture';
 import {
   marksGeometry,
@@ -52,6 +53,8 @@ export interface ViewportOptions {
 
 export interface Viewport {
   applyPreset(preset: CameraPreset): void;
+  /** Dev/dogfood aid: each piece's centre in client coordinates. */
+  pieceScreenPositions(): Array<{ id: string; x: number; y: number }>;
   dispose(): void;
 }
 
@@ -179,11 +182,12 @@ export function createViewport(options: ViewportOptions): Viewport {
 
     const group = new Group();
     const placement = placementById.get(piece.id);
-    group.position.set(
-      placement?.xCm ?? 0,
-      PIECE_LIFT_CM,
-      -(placement?.yCm ?? 0),
-    );
+    if (!placement) throw new Error(`no layout for piece ${piece.id}`);
+    // Mat-space placements are 0-based; the mat mesh is centred on the
+    // origin, so the placement must be re-centred or pieces hang off the
+    // mat's right edge.
+    const world = placementToWorld(placement, MAT_WIDTH_CM, MAT_DEPTH_CM);
+    group.position.set(world.xCm, PIECE_LIFT_CM, world.zCm);
     group.add(mesh, baseOutline, highlight, marks);
     piecesGroup.add(group);
 
@@ -347,5 +351,23 @@ export function createViewport(options: ViewportOptions): Viewport {
     renderer.dispose();
   };
 
-  return { applyPreset, dispose };
+  const pieceScreenPositions = (): Array<{
+    id: string;
+    x: number;
+    y: number;
+  }> => {
+    const rect = canvas.getBoundingClientRect();
+    const world = new Vector3();
+    return views.map((view) => {
+      view.group.getWorldPosition(world);
+      const ndc = world.clone().project(camera);
+      return {
+        id: view.id,
+        x: rect.left + ((ndc.x + 1) / 2) * rect.width,
+        y: rect.top + ((1 - ndc.y) / 2) * rect.height,
+      };
+    });
+  };
+
+  return { applyPreset, pieceScreenPositions, dispose };
 }

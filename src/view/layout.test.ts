@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { layoutOnMat } from './layout';
+import { layoutOnMat, placementToWorld } from './layout';
 
 describe('layoutOnMat', () => {
   const opts = { gapCm: 5, matWidthCm: 100 };
@@ -70,5 +70,43 @@ describe('layoutOnMat', () => {
   it('is deterministic for the same input', () => {
     const inputs = [{ id: 'x', widthCm: 33, heightCm: 7 }];
     expect(layoutOnMat(inputs, opts)).toStrictEqual(layoutOnMat(inputs, opts));
+  });
+});
+
+describe('placementToWorld', () => {
+  const MAT_W = 150;
+  const MAT_D = 100;
+
+  it('maps the mat centre onto the world origin', () => {
+    const world = placementToWorld(
+      { id: 'a', xCm: MAT_W / 2, yCm: MAT_D / 2 },
+      MAT_W,
+      MAT_D,
+    );
+    expect(world.xCm).toBe(0);
+    expect(world.zCm).toBe(0);
+  });
+
+  it('maps the mat top-left corner to (−width/2, +depth/2)', () => {
+    const world = placementToWorld({ id: 'a', xCm: 0, yCm: 0 }, MAT_W, MAT_D);
+    expect(world.xCm).toBe(-75);
+    expect(world.zCm).toBe(50);
+  });
+
+  it('keeps laid-out pieces on the origin-centred mat', () => {
+    const placements = layoutOnMat(
+      [
+        { id: 'cover', widthCm: 40, heightCm: 28 },
+        { id: 'flap', widthCm: 40, heightCm: 14 },
+        { id: 'pocket', widthCm: 18, heightCm: 12 },
+      ],
+      { gapCm: 6, matWidthCm: MAT_W },
+    );
+    for (const p of placements) {
+      const w = placementToWorld(p, MAT_W, MAT_D);
+      // Min-corner must sit inside the centred mat extents.
+      expect(Math.abs(w.xCm)).toBeLessThanOrEqual(MAT_W / 2);
+      expect(Math.abs(w.zCm)).toBeLessThanOrEqual(MAT_D / 2);
+    }
   });
 });

@@ -24,6 +24,23 @@ export interface LayoutOptions {
   readonly matWidthCm: number;
 }
 
+/**
+ * Converts a mat-space placement (0-based, origin at the mat's top-left
+ * corner) into world space, where the mat is centred on the origin.
+ * World Y is up; the mat lies in the XZ plane with +Z toward the viewer,
+ * so mat-down (+yCm) maps to world −Z.
+ */
+export function placementToWorld(
+  placement: Placement,
+  matWidthCm: number,
+  matDepthCm: number,
+): { xCm: number; zCm: number } {
+  return {
+    xCm: placement.xCm - matWidthCm / 2,
+    zCm: matDepthCm / 2 - placement.yCm,
+  };
+}
+
 export function layoutOnMat(
   inputs: readonly LayoutInput[],
   options: LayoutOptions,
