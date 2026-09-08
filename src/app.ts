@@ -30,6 +30,10 @@ import {
 import { createFabricPanel } from './view/fabricPanel';
 import { TITAN_PANTS_TEMPLATE } from './engine/titanSettings';
 import { redraftPants } from './engine/titanPants';
+import { createAssemblyControls } from './view/assemblyControls';
+import type { AssemblyControlsHandle } from './view/assemblyControls';
+import { createAssemblyView } from './view/assemblyView';
+import type { AssemblyView } from './view/assemblyView';
 import { createMeasurementsPanel } from './view/measurementsPanel';
 import { createPiecePanel } from './view/panel';
 import type { PanelHandle } from './view/panel';
@@ -181,9 +185,12 @@ export function mountApp(root: HTMLElement): void {
   const selection = createSelectionStore();
   let currentProject: Project = startup.project;
   let viewport: Viewport | null = null;
+  let assemblyView: AssemblyView | null = null;
+  let assemblyControls: AssemblyControlsHandle | null = null;
   let panelHandle: PanelHandle | null = null;
   let fabricHandle: { dispose(): void } | null = null;
   let unsubscribe: (() => void) | null = null;
+  let assembleButton: HTMLButtonElement | null = null;
 
   const statusFor = (id: string | null): string => {
     if (!id) return 'Nothing selected — tap a piece or pick one from the list.';
@@ -201,6 +208,7 @@ export function mountApp(root: HTMLElement): void {
     unsubscribe?.();
     panelHandle?.dispose();
     fabricHandle?.dispose();
+    teardownAssemblyMode();
     viewport?.dispose();
     currentProject = project;
     selection.select(null);
@@ -234,11 +242,89 @@ export function mountApp(root: HTMLElement): void {
     // every piece live through the viewport. Re-created per mount so a
     // loaded or imported project's fabric seeds the controls.
     fabricHandle = createFabricPanel(fabricSection, project.fabric, {
-      onFabricChange: (spec) => viewport?.applyFabric(spec),
+      onFabricChange: (spec) => {
+        // Fabric changes follow the live mode: assembly re-skins through
+        // the assembly view, the mat through the viewport.
+        if (assemblyView) assemblyView.applyFabric(spec);
+        else viewport?.applyFabric(spec);
+      },
     });
     unsubscribe = selection.subscribe(renderStatus);
     renderStatus(selection.get());
   };
+
+  // --- Assembly mode (fold-around-seam walkthrough) ------------------------
+  // Function declarations on purpose: mountProject (above) and the pagehide
+  // handler call these, and they must be live wherever those run first.
+
+  /** Starter projects carry a learn card; other projects get a plain sign-off. */
+  function starterLearnCard(project: Project): string {
+    return 'learnCard' in project && typeof project.learnCard === 'string'
+      ? project.learnCard
+      : 'Assembly complete.';
+  }
+
+  /** Remove the assembly scene + controls, restoring the mat's button. */
+  function teardownAssemblyMode(): void {
+    assemblyControls?.dispose();
+    assemblyControls = null;
+    assemblyView?.dispose();
+    assemblyView = null;
+    if (assembleButton) assembleButton.disabled = false;
+  }
+
+  /** Leave assembly mode and rebuild the cutting mat. */
+  function exitAssembly(): void {
+    if (!assemblyView && !assemblyControls) return;
+    teardownAssemblyMode();
+    mountProject(currentProject);
+    narrate('Back on the cutting mat.');
+  }
+
+  /** Swap the mat for the assembly walkthrough of the current project. */
+  function enterAssembly(): void {
+    if (assemblyView) return;
+    viewport?.dispose();
+    viewport = null;
+    canvasHolder.innerHTML = '';
+    const canvas = document.createElement('canvas');
+    canvas.className = 'viewport-canvas';
+    canvas.style.touchAction = 'none';
+    canvasHolder.appendChild(canvas);
+    try {
+      assemblyView = createAssemblyView({
+        canvas,
+        container: canvasHolder,
+        project: currentProject,
+      });
+    } catch (error) {
+      // Invalid or unmatchable seams (e.g. a hand-edited import): narrate
+      // and stay on the mat rather than swapping in a broken mode.
+      console.error('assembly failed to plan', error);
+      assemblyView = null;
+      mountProject(currentProject);
+      narrate(
+        `Cannot assemble this project (${errorMessage(error)}) — the cutting mat is unchanged.`,
+      );
+      return;
+    }
+    const nameOf = (id: string): string =>
+      currentProject.pieces.find((p) => p.id === id)?.name ?? id;
+    const labels = assemblyView.plan.steps.map(({ step }) => ({
+      title: `${nameOf(step.pieces[0])} → ${nameOf(step.pieces[1])}`,
+      note: step.note,
+    }));
+    assemblyControls = createAssemblyControls(canvasHolder, {
+      labels,
+      learnCard: starterLearnCard(currentProject),
+      onScrub: (state) => assemblyView?.setScrub(state.stepIndex, state.t),
+      onExit: exitAssembly,
+    });
+    if (assembleButton) assembleButton.disabled = true;
+    narrate(
+      `Assembly — ${labels.length} seam${labels.length === 1 ? '' : 's'} to fold. Scrub through them.`,
+    );
+  }
 
   // Narration and selection share the status bar: the latest event wins.
   const narrate = (message: string): void => {
@@ -280,14 +366,18 @@ export function mountApp(root: HTMLElement): void {
   );
 
   // --- Toolbar (F7: projects as data) -------------------------------------
-  const addButton = (label: string, onClick: () => void): void => {
+  const addButton = (label: string, onClick: () => void): HTMLButtonElement => {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'toolbar-btn';
     button.textContent = label;
     button.addEventListener('click', onClick);
     actions.appendChild(button);
+    return button;
   };
+
+  // Mode entry: the Assemble button hands the stage to the fold walkthrough.
+  assembleButton = addButton('Assemble', enterAssembly);
 
   addButton('Save', () => {
     try {
@@ -383,10 +473,13 @@ export function mountApp(root: HTMLElement): void {
   });
 
   // Dev-only dogfooding hook (stripped from production builds): lets the
-  // automation aim taps at exact piece positions.
+  // automation aim taps at exact piece positions in either mode.
   if (import.meta.env.DEV) {
     window.__patternStudioDebug = {
-      pieceScreenPositions: () => viewport?.pieceScreenPositions() ?? [],
+      pieceScreenPositions: () =>
+        assemblyView
+          ? assemblyView.pieceScreenPositions()
+          : (viewport?.pieceScreenPositions() ?? []),
     };
   }
 
@@ -395,6 +488,7 @@ export function mountApp(root: HTMLElement): void {
     fabricHandle?.dispose();
     measurementsPanel.dispose();
     panelHandle?.dispose();
+    teardownAssemblyMode();
     viewport?.dispose();
     viewport = null;
   });
