@@ -24,10 +24,8 @@ import {
   Matrix4,
   Mesh,
   MeshPhysicalMaterial,
-  MeshStandardMaterial,
   PCFSoftShadowMap,
   PerspectiveCamera,
-  PlaneGeometry,
   Scene,
   TOUCH,
   Vector3,
@@ -42,8 +40,7 @@ import {
 } from '../engine/assembly';
 import type { AssemblyPlan } from '../engine/assembly';
 import { createFabricTextures, roughnessFor } from './fabricTexture';
-import { createMatTexture } from './matTexture';
-import { MAT_DEPTH_CM, MAT_TILE_CM, MAT_WIDTH_CM } from './matSurface';
+import { createSurfaceMeshes } from './surfaceMeshes';
 import {
   applyGrainlineUVs,
   marksGeometry,
@@ -111,19 +108,9 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
   sun.shadow.camera.far = 500;
   scene.add(sun);
 
-  // --- Cutting mat --------------------------------------------------------
-  const matGeometry = new PlaneGeometry(MAT_WIDTH_CM, MAT_DEPTH_CM);
-  const matTexture = createMatTexture();
-  matTexture.repeat.set(MAT_WIDTH_CM / MAT_TILE_CM, MAT_DEPTH_CM / MAT_TILE_CM);
-  const matMaterial = new MeshStandardMaterial({
-    map: matTexture,
-    roughness: 0.95,
-    metalness: 0,
-  });
-  const mat = new Mesh(matGeometry, matMaterial);
-  mat.rotation.x = -Math.PI / 2;
-  mat.receiveShadow = true;
-  scene.add(mat);
+  // --- Surfaces: fixed reference mat + paper roll (shared module) ---------
+  const surfaces = createSurfaceMeshes();
+  scene.add(surfaces.group);
 
   // --- Pieces -------------------------------------------------------------
   const piecesRoot = new Group();
@@ -133,9 +120,7 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
   const fabricTextures = createFabricTextures(currentFabric);
 
   const disposables: { dispose(): void }[] = [
-    matGeometry,
-    matMaterial,
-    matTexture,
+    surfaces,
     fabricTextures,
   ];
   const pieceViews: AssemblyPieceView[] = [];

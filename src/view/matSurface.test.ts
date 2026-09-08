@@ -4,7 +4,11 @@ import {
   MAT_TILE_CM,
   MAT_WIDTH_CM,
   PAPER_MARGIN_CM,
+  PAPER_SURFACE_Y_CM,
+  MAT_SURFACE_Y_CM,
   paperBoundsCm,
+  paperSurfaceExtentCm,
+  surfaceHeightCm,
   workBoundsCm,
 } from './matSurface';
 
@@ -45,5 +49,55 @@ describe('paperBoundsCm', () => {
     expect(paper.minY).toBe(work.minY - PAPER_MARGIN_CM);
     expect(paper.maxX).toBe(work.maxX + PAPER_MARGIN_CM);
     expect(paper.maxY).toBe(work.maxY + PAPER_MARGIN_CM);
+  });
+});
+
+describe('surfaceHeightCm', () => {
+  it('keeps the mat at the world floor and the paper a step below', () => {
+    expect(MAT_SURFACE_Y_CM).toBe(0);
+    expect(PAPER_SURFACE_Y_CM).toBe(-0.15);
+    expect(surfaceHeightCm('mat')).toBe(MAT_SURFACE_Y_CM);
+    expect(surfaceHeightCm('paper')).toBe(PAPER_SURFACE_Y_CM);
+  });
+});
+
+describe('paperSurfaceExtentCm', () => {
+  it('is a minimal apron beyond the far edge when there is no work', () => {
+    expect(paperSurfaceExtentCm(null)).toEqual({
+      minX: 0,
+      minY: MAT_DEPTH_CM,
+      maxX: MAT_WIDTH_CM,
+      maxY: MAT_DEPTH_CM + PAPER_MARGIN_CM,
+    });
+  });
+
+  it('starts at the mat’s far edge, never inside the mat', () => {
+    const extent = paperSurfaceExtentCm({
+      minX: 6,
+      minY: 6,
+      maxX: 82,
+      maxY: 127,
+    });
+    expect(extent.minY).toBe(MAT_DEPTH_CM);
+  });
+
+  it('follows the paper bounds’ side margins and far side', () => {
+    const work = { minX: 6, minY: 6, maxX: 82, maxY: 127 };
+    const paper = paperBoundsCm(work);
+    const extent = paperSurfaceExtentCm(work);
+    expect(extent.minX).toBe(paper.minX);
+    expect(extent.maxX).toBe(paper.maxX);
+    expect(extent.maxY).toBe(paper.maxY);
+  });
+
+  it('keeps a minimal apron when the work fits inside the mat', () => {
+    const extent = paperSurfaceExtentCm({
+      minX: 10,
+      minY: 10,
+      maxX: 40,
+      maxY: 60,
+    });
+    expect(extent.minY).toBe(MAT_DEPTH_CM);
+    expect(extent.maxY).toBe(MAT_DEPTH_CM + PAPER_MARGIN_CM);
   });
 });
