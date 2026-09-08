@@ -10,8 +10,8 @@
  * flip y at the pipeline boundary, see src/pipeline/svgShape.ts).
  */
 import { closePath, cubicTo, lineTo, moveTo, quadTo } from '../model';
-import type { Piece, StarterProject } from '../model';
-import { vec2 } from '../model';
+import type { Piece, SeamStep, StarterProject } from '../model';
+import { createSeamStep, vec2 } from '../model';
 
 function notebookHolderPieces(): Piece[] {
   const seamAllowance = 1.5;
@@ -40,14 +40,15 @@ function notebookHolderPieces(): Piece[] {
     lineTo(vec2(21.4, 17.2)),
   ];
 
-  // Flap: 40 cm wide, shaped lower edge (cut 1). The cubic sags the hem so
-  // the flap drapes over the cover's top edge.
+  // Flap: 40 cm wide hem, shaped lower edge (cut 1). The cubic sags the
+  // hem so the flap drapes over the cover's top edge. The top edge is
+  // 34 cm to match the cover's top edge — the seam they share.
   const flapOutline = [
     moveTo(vec2(0, 3)),
     cubicTo(vec2(13, 0), vec2(27, 0), vec2(40, 3)),
     lineTo(vec2(40, 12)),
-    quadTo(vec2(40, 14), vec2(38, 14)),
-    lineTo(vec2(2, 14)),
+    quadTo(vec2(40, 14), vec2(37, 14)),
+    lineTo(vec2(3, 14)),
     quadTo(vec2(0, 14), vec2(0, 12)),
     closePath(),
   ];
@@ -61,27 +62,29 @@ function notebookHolderPieces(): Piece[] {
     lineTo(vec2(24.4, 9.1)),
   ];
 
-  // Inside pocket: 18 x 12 cm, rounded bottom corners (cut 2).
+  // Inside pocket: 22 x 12 cm, rounded bottom corners (cut 2). The top
+  // edge is 22 cm so it matches the cover's left edge exactly when the
+  // pocket folds on during assembly.
   const pocketOutline = [
     moveTo(vec2(0, 12)),
     lineTo(vec2(0, 3)),
     quadTo(vec2(0, 0), vec2(3, 0)),
-    lineTo(vec2(15, 0)),
-    quadTo(vec2(18, 0), vec2(18, 3)),
-    lineTo(vec2(18, 12)),
+    lineTo(vec2(19, 0)),
+    quadTo(vec2(22, 0), vec2(22, 3)),
+    lineTo(vec2(22, 12)),
     closePath(),
   ];
   const pocketMarks = [
     // Grainline arrow, vertical.
-    moveTo(vec2(9, 3)),
-    lineTo(vec2(9, 9)),
-    moveTo(vec2(9, 9)),
-    lineTo(vec2(7.6, 7.2)),
-    moveTo(vec2(9, 9)),
-    lineTo(vec2(10.4, 7.2)),
+    moveTo(vec2(11, 3)),
+    lineTo(vec2(11, 9)),
+    moveTo(vec2(11, 9)),
+    lineTo(vec2(9.6, 7.2)),
+    moveTo(vec2(11, 9)),
+    lineTo(vec2(12.4, 7.2)),
     // Fold mark on the top edge.
-    moveTo(vec2(7, 12)),
-    lineTo(vec2(11, 12)),
+    moveTo(vec2(8, 12)),
+    lineTo(vec2(14, 12)),
   ];
 
   return [
@@ -116,10 +119,40 @@ function notebookHolderPieces(): Piece[] {
 }
 
 /**
- * The M1 starter. assembly is empty on purpose: seam steps reference
- * matched edge chains and belong to assembly mode (M3), where the build
- * order becomes the lesson.
+ * The M1 starter's build order: the flap folds onto the cover's top edge,
+ * then the pocket folds onto the cover's left edge. Both seams are straight
+ * matched-length edge chains, so assembly mode can demonstrate the fold
+ * sequence on real pieces today.
  */
+function notebookHolderAssembly(): SeamStep[] {
+  return [
+    createSeamStep({
+      pieces: ['flap', 'cover'],
+      edges: [
+        // Flap's straight top edge (34 cm) folds onto the cover's top edge.
+        { pieceId: 'flap', startVertex: 3, edgeCount: 1 },
+        { pieceId: 'cover', startVertex: 4, edgeCount: 1 },
+      ],
+      order: 1,
+      note:
+        'Lay the flap printed-side down on the cover, line up the straight ' +
+        'top edges, and sew. The flap will fold down over the front.',
+    }),
+    createSeamStep({
+      pieces: ['pocket', 'cover'],
+      edges: [
+        // Pocket's straight top edge (22 cm) onto the cover's left edge.
+        { pieceId: 'pocket', startVertex: 5, edgeCount: 1 },
+        { pieceId: 'cover', startVertex: 6, edgeCount: 1 },
+      ],
+      order: 2,
+      note:
+        'Fold the pocket onto the cover along the long left edge — you cut ' +
+        'two, so repeat for the second pocket on the other side.',
+    }),
+  ];
+}
+
 export const NOTEBOOK_HOLDER_STARTER: StarterProject = {
   id: 'starter-notebook-holder',
   name: 'Notebook holder',
@@ -136,7 +169,7 @@ export const NOTEBOOK_HOLDER_STARTER: StarterProject = {
     weight: 340,
   },
   pieces: notebookHolderPieces(),
-  assembly: [],
+  assembly: notebookHolderAssembly(),
   learnCard:
     "What you'll learn: this starter is all straight seams — attaching the flap, " +
     'then the pockets, then closing the lining — so you can practise turning ' +
