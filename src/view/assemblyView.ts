@@ -42,7 +42,8 @@ import {
 } from '../engine/assembly';
 import type { AssemblyPlan } from '../engine/assembly';
 import { createFabricTextures, roughnessFor } from './fabricTexture';
-import { createMatTexture, MAT_TILE_CM } from './matTexture';
+import { createMatTexture } from './matTexture';
+import { MAT_DEPTH_CM, MAT_TILE_CM, MAT_WIDTH_CM } from './matSurface';
 import {
   applyGrainlineUVs,
   marksGeometry,
@@ -50,9 +51,6 @@ import {
 } from './pieceGeometry';
 import { watchPointerRecovery } from './pointerGestures';
 
-/** Cutting mat size in true centimetres (matches the viewport). */
-const MAT_WIDTH_CM = 150;
-const MAT_DEPTH_CM = 100;
 /** Lift pieces off the mat to avoid z-fighting with the grid. */
 const PIECE_LIFT_CM = 0.06;
 /** Seam highlight rides just above the anchor's surface. */

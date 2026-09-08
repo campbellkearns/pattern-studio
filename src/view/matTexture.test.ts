@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { MAT_TILE_CM, matGridLines } from './matTexture';
+import { MAT_TILE_CM } from './matSurface';
+import { matGridLines } from './matTexture';
 
 describe('matGridLines', () => {
   it('tiers the default 10 cm tile: 1 cm minor, 5 cm medium, 10 cm major', () => {

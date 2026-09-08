@@ -34,7 +34,8 @@ import type { FabricSpec, Piece, Project } from '../model';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { createFabricTextures, roughnessFor } from './fabricTexture';
 import { layoutOnMat, placementToWorld } from './layout';
-import { createMatTexture, MAT_TILE_CM } from './matTexture';
+import { createMatTexture } from './matTexture';
+import { MAT_DEPTH_CM, MAT_TILE_CM, MAT_WIDTH_CM } from './matSurface';
 import {
   applyGrainlineUVs,
   marksGeometry,
@@ -65,9 +66,6 @@ export interface Viewport {
   dispose(): void;
 }
 
-/** Cutting mat size in true centimetres. */
-const MAT_WIDTH_CM = 150;
-const MAT_DEPTH_CM = 100;
 /** Lift pieces off the mat to avoid z-fighting with the grid. */
 const PIECE_LIFT_CM = 0.06;
 /** Marks hover slightly above their piece's surface. */
@@ -161,12 +159,16 @@ export function createViewport(options: ViewportOptions): Viewport {
   };
 
   const buildPieceViews = (pieces: readonly Piece[]): void => {
+    // Depth-aware layout: rows past the mat's depth budget land on the
+    // paper surface (Placement.surface). Until the paper-roll PR renders
+    // that surface, overflow pieces intentionally sit beyond the mat's
+    // far edge — the honest intermediate state, not a layout regression.
     const placements = layoutOnMat(
       pieces.map((piece) => {
         const e = pieceExtents(piece);
         return { id: piece.id, widthCm: e.width, heightCm: e.height };
       }),
-      { gapCm: 6, matWidthCm: MAT_WIDTH_CM },
+      { gapCm: 6, matWidthCm: MAT_WIDTH_CM, matDepthCm: MAT_DEPTH_CM },
     );
     const placementById = new Map(placements.map((p) => [p.id, p]));
 
