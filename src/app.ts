@@ -27,6 +27,7 @@ import {
   planShare,
   readShareToken,
 } from './io/shareLink';
+import { createFabricPanel } from './view/fabricPanel';
 import { TITAN_PANTS_TEMPLATE } from './engine/titanSettings';
 import { redraftPants } from './engine/titanPants';
 import { createMeasurementsPanel } from './view/measurementsPanel';
@@ -154,12 +155,16 @@ export function mountApp(root: HTMLElement): void {
   const panel = document.createElement('aside');
   panel.className = 'panel';
   // Measurements drive the redraft, so the panel leads with them; the
-  // piece list underneath reflects whatever is currently on the mat.
+  // piece list underneath reflects whatever is currently on the mat, and
+  // the fabric panel beside them survives piece-list re-mounts (it is
+  // re-created per project load, not cleared by the piece list).
   const measurementsSection = document.createElement('section');
   measurementsSection.className = 'panel-section';
   const piecesSection = document.createElement('section');
   piecesSection.className = 'panel-section';
-  panel.append(measurementsSection, piecesSection);
+  const fabricSection = document.createElement('section');
+  fabricSection.className = 'fabric-panel';
+  panel.append(measurementsSection, piecesSection, fabricSection);
   layout.append(canvasHolder, panel);
 
   const status = document.createElement('div');
@@ -177,6 +182,7 @@ export function mountApp(root: HTMLElement): void {
   let currentProject: Project = startup.project;
   let viewport: Viewport | null = null;
   let panelHandle: PanelHandle | null = null;
+  let fabricHandle: { dispose(): void } | null = null;
   let unsubscribe: (() => void) | null = null;
 
   const statusFor = (id: string | null): string => {
@@ -194,6 +200,7 @@ export function mountApp(root: HTMLElement): void {
   const mountProject = (project: Project): void => {
     unsubscribe?.();
     panelHandle?.dispose();
+    fabricHandle?.dispose();
     viewport?.dispose();
     currentProject = project;
     selection.select(null);
@@ -222,6 +229,12 @@ export function mountApp(root: HTMLElement): void {
     }
     panelHandle = createPiecePanel(piecesSection, project.pieces, selection, {
       onPreset: (preset) => viewport?.applyPreset(preset),
+    });
+    // Fabric panel: weave / scale / colour / stripe pickers that re-skin
+    // every piece live through the viewport. Re-created per mount so a
+    // loaded or imported project's fabric seeds the controls.
+    fabricHandle = createFabricPanel(fabricSection, project.fabric, {
+      onFabricChange: (spec) => viewport?.applyFabric(spec),
     });
     unsubscribe = selection.subscribe(renderStatus);
     renderStatus(selection.get());
@@ -379,6 +392,7 @@ export function mountApp(root: HTMLElement): void {
 
   window.addEventListener('pagehide', () => {
     unsubscribe?.();
+    fabricHandle?.dispose();
     measurementsPanel.dispose();
     panelHandle?.dispose();
     viewport?.dispose();

@@ -18,6 +18,7 @@ import {
   LineBasicMaterial,
   LineSegments,
   Mesh,
+  MeshPhysicalMaterial,
   MeshStandardMaterial,
   PCFSoftShadowMap,
   PerspectiveCamera,
@@ -29,11 +30,13 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three';
-import type { Piece, Project } from '../model';
+import type { FabricSpec, Piece, Project } from '../model';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { createFabricTextures, roughnessFor } from './fabricTexture';
 import { layoutOnMat, placementToWorld } from './layout';
 import { createMatTexture, MAT_TILE_CM } from './matTexture';
 import {
+  applyGrainlineUVs,
   marksGeometry,
   pieceExtents,
   pieceOutlineGeometry,
@@ -53,6 +56,8 @@ export interface ViewportOptions {
 
 export interface Viewport {
   applyPreset(preset: CameraPreset): void;
+  /** Re-skin every piece with a new fabric spec, live. */
+  applyFabric(spec: FabricSpec): void;
   /** Replace the rendered pieces (parametric redraft); layout recomputes. */
   updatePieces(pieces: readonly Piece[]): void;
   /** Dev/dogfood aid: each piece's centre in client coordinates. */
@@ -77,7 +82,7 @@ interface PieceView {
   id: string;
   group: Group;
   mesh: Mesh;
-  material: MeshStandardMaterial;
+  material: MeshPhysicalMaterial;
   highlight: LineSegments;
 }
 
@@ -127,10 +132,20 @@ export function createViewport(options: ViewportOptions): Viewport {
   const piecesGroup = new Group();
   scene.add(piecesGroup);
 
+  // One shared weave texture set serves every piece: each piece's UVs are
+  // rotated to its own grainline (below), so per-piece texture clones are
+  // unnecessary — and a fabric swap repaints three canvases once.
+  // Live fabric spec: applyFabric updates this so a later redraft rebuild
+  // (updatePieces) re-skins new meshes with the CURRENT fabric, not the
+  // project's original one. Project.fabric is readonly by design.
+  let currentFabric: FabricSpec = project.fabric;
+  const fabricTextures = createFabricTextures(currentFabric);
+
   const sharedDisposables: { dispose(): void }[] = [
     matGeometry,
     matMaterial,
     matTexture,
+    fabricTextures,
   ];
   let pieceDisposables: { dispose(): void }[] = [];
   let views: PieceView[] = [];
@@ -158,19 +173,32 @@ export function createViewport(options: ViewportOptions): Viewport {
     for (const piece of pieces) {
       const extents = pieceExtents(piece);
       const outlineGeometry = pieceOutlineGeometry(piece);
+      // Weave and stripes run true to this piece's grain (the grainline lock).
+      applyGrainlineUVs(outlineGeometry, piece);
       // Move the bbox min-corner to the origin so placement positions the
       // piece by its layout slot, then lay it flat on the mat (XY → XZ).
       outlineGeometry.translate(-extents.minX, -extents.minY, 0);
       outlineGeometry.rotateX(-Math.PI / 2);
 
-      const material = new MeshStandardMaterial({
-        color: project.fabric.color,
-        roughness: 0.85,
+      const material = new MeshPhysicalMaterial({
+        map: fabricTextures.map,
+        normalMap: fabricTextures.normalMap,
+        roughnessMap: fabricTextures.roughnessMap,
+        color: currentFabric.color,
+        roughness: roughnessFor(currentFabric.weave),
         metalness: 0,
-        // Push the fill behind its outline edges so the cutting line reads.
-        polygonOffset: true,
-        polygonOffsetFactor: 1,
-        polygonOffsetUnits: 1,
+        // Cloth response: sheen is the three.js material feature built for
+        // fabric (findings log §2); tint follows the fabric color, lightened.
+        sheen: 0.5,
+        sheenRoughness: 0.55,
+        sheenColor: new Color(currentFabric.color).lerp(
+          new Color('#ffffff'),
+          0.55,
+        ),
+        // No polygonOffset: on SwiftShader (Chrome 153 headless, iPad-class
+        // GPUs) a textured MeshPhysicalMaterial with polygonOffset factor/units
+        // 1 rasterizes to zero pixels — pieces vanish entirely. PIECE_LIFT_CM
+        // already separates pieces from the mat, so the offset is redundant.
       });
       const mesh = new Mesh(outlineGeometry, material);
       mesh.castShadow = true;
@@ -247,6 +275,18 @@ export function createViewport(options: ViewportOptions): Viewport {
     controls.update();
   };
   applyPreset('three-d');
+
+  // --- Live fabric swap: one repaint, every piece re-skinned -------------
+  const applyFabric = (spec: FabricSpec): void => {
+    currentFabric = spec;
+    fabricTextures.update(spec);
+    const tint = new Color(spec.color).lerp(new Color('#ffffff'), 0.55);
+    for (const view of views) {
+      view.material.color.set(spec.color);
+      view.material.roughness = roughnessFor(spec.weave);
+      view.material.sheenColor.copy(tint);
+    }
+  };
 
   // --- Hover + tap selection (Pointer Events; hover is never required) ---
   const raycaster = new Raycaster();
@@ -398,5 +438,5 @@ export function createViewport(options: ViewportOptions): Viewport {
     });
   };
 
-  return { applyPreset, updatePieces, pieceScreenPositions, dispose };
+  return { applyPreset, applyFabric, updatePieces, pieceScreenPositions, dispose };
 }
