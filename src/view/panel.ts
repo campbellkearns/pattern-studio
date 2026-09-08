@@ -17,6 +17,8 @@ export interface PanelCallbacks {
 }
 
 export interface PanelHandle {
+  /** Swap the listed pieces (parametric redraft); selection ids persist. */
+  updatePieces(pieces: readonly Piece[]): void;
   dispose(): void;
 }
 
@@ -27,11 +29,11 @@ function formatSize(piece: Piece): string {
 
 export function createPiecePanel(
   container: HTMLElement,
-  pieces: readonly Piece[],
+  initialPieces: readonly Piece[],
   selection: SelectionStore,
   callbacks: PanelCallbacks,
 ): PanelHandle {
-  container.innerHTML = '';
+  let pieces = initialPieces;
 
   const header = document.createElement('div');
   header.className = 'panel-header';
@@ -42,8 +44,7 @@ export function createPiecePanel(
 
   const presets = document.createElement('div');
   presets.className = 'presets';
-  const presetButtons: { button: HTMLButtonElement; handler: () => void }[] =
-    [];
+  const presetButtons: { button: HTMLButtonElement; handler: () => void }[] = [];
   for (const preset of ['top', 'three-d'] as const) {
     const button = document.createElement('button');
     button.type = 'button';
@@ -59,30 +60,37 @@ export function createPiecePanel(
   const list = document.createElement('ul');
   list.className = 'piece-list';
 
-  const entries = pieces.map((piece) => {
-    const item = document.createElement('li');
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'piece-btn';
-    button.dataset.pieceId = piece.id;
+  let entries: { button: HTMLButtonElement; onClick: () => void }[] = [];
 
-    const name = document.createElement('span');
-    name.className = 'piece-name';
-    name.textContent = piece.name;
-    const meta = document.createElement('span');
-    meta.className = 'piece-meta';
-    meta.textContent = `cut ${piece.cutCount} · ${formatSize(piece)}`;
+  const buildList = (): void => {
+    list.innerHTML = '';
+    entries = [];
+    for (const piece of pieces) {
+      const item = document.createElement('li');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'piece-btn';
+      button.dataset.pieceId = piece.id;
 
-    button.append(name, meta);
-    item.appendChild(button);
-    list.appendChild(item);
+      const name = document.createElement('span');
+      name.className = 'piece-name';
+      name.textContent = piece.name;
+      const meta = document.createElement('span');
+      meta.className = 'piece-meta';
+      meta.textContent = `cut ${piece.cutCount} · ${formatSize(piece)}`;
 
-    const onClick = (): void => {
-      selection.select(selection.get() === piece.id ? null : piece.id);
-    };
-    button.addEventListener('click', onClick);
-    return { button, onClick };
-  });
+      button.append(name, meta);
+      item.appendChild(button);
+      list.appendChild(item);
+
+      const onClick = (): void => {
+        selection.select(selection.get() === piece.id ? null : piece.id);
+      };
+      button.addEventListener('click', onClick);
+      entries.push({ button, onClick });
+    }
+  };
+  buildList();
 
   container.append(header, list);
 
@@ -97,6 +105,11 @@ export function createPiecePanel(
   const unsubscribe = selection.subscribe(render);
 
   return {
+    updatePieces(next: readonly Piece[]): void {
+      pieces = next;
+      buildList();
+      render(selection.get());
+    },
     dispose(): void {
       unsubscribe();
       for (const { button, onClick } of entries) {

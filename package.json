@@ -14,6 +14,12 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
+    "@freesewing/config": "4.10.1",
+    "@freesewing/core": "4.10.1",
+    "@freesewing/models": "4.10.1",
+    "@freesewing/plugin-measurements": "4.10.1",
+    "@freesewing/plugin-transform": "4.10.1",
+    "@freesewing/titan": "4.10.1",
     "three": "^0.185.1"
   },
   "devDependencies": {

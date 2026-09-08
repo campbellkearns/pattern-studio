@@ -29,7 +29,7 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three';
-import type { Project } from '../model';
+import type { Piece, Project } from '../model';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { layoutOnMat, placementToWorld } from './layout';
 import { createMatTexture, MAT_TILE_CM } from './matTexture';
@@ -53,6 +53,8 @@ export interface ViewportOptions {
 
 export interface Viewport {
   applyPreset(preset: CameraPreset): void;
+  /** Replace the rendered pieces (parametric redraft); layout recomputes. */
+  updatePieces(pieces: readonly Piece[]): void;
   /** Dev/dogfood aid: each piece's centre in client coordinates. */
   pieceScreenPositions(): Array<{ id: string; x: number; y: number }>;
   dispose(): void;
@@ -125,84 +127,106 @@ export function createViewport(options: ViewportOptions): Viewport {
   const piecesGroup = new Group();
   scene.add(piecesGroup);
 
-  const placements = layoutOnMat(
-    project.pieces.map((piece) => {
-      const e = pieceExtents(piece);
-      return { id: piece.id, widthCm: e.width, heightCm: e.height };
-    }),
-    { gapCm: 6, matWidthCm: MAT_WIDTH_CM },
-  );
-  const placementById = new Map(placements.map((p) => [p.id, p]));
-
-  const views: PieceView[] = [];
-  const meshes: Mesh[] = [];
-  const disposables: { dispose(): void }[] = [
+  const sharedDisposables: { dispose(): void }[] = [
     matGeometry,
     matMaterial,
     matTexture,
   ];
+  let pieceDisposables: { dispose(): void }[] = [];
+  let views: PieceView[] = [];
+  let meshes: Mesh[] = [];
 
-  for (const piece of project.pieces) {
-    const extents = pieceExtents(piece);
-    const outlineGeometry = pieceOutlineGeometry(piece);
-    // Move the bbox min-corner to the origin so placement positions the
-    // piece by its layout slot, then lay it flat on the mat (XY → XZ).
-    outlineGeometry.translate(-extents.minX, -extents.minY, 0);
-    outlineGeometry.rotateX(-Math.PI / 2);
+  /** Remove every piece view, freeing only the per-piece GPU resources. */
+  const clearPieceViews = (): void => {
+    for (const view of views) piecesGroup.remove(view.group);
+    for (const d of pieceDisposables) d.dispose();
+    pieceDisposables = [];
+    views = [];
+    meshes = [];
+  };
 
-    const material = new MeshStandardMaterial({
-      color: project.fabric.color,
-      roughness: 0.85,
-      metalness: 0,
-      // Push the fill behind its outline edges so the cutting line reads.
-      polygonOffset: true,
-      polygonOffsetFactor: 1,
-      polygonOffsetUnits: 1,
-    });
-    const mesh = new Mesh(outlineGeometry, material);
-    mesh.castShadow = true;
-    mesh.userData.pieceId = piece.id;
-
-    const edgeGeometry = new EdgesGeometry(outlineGeometry, 10);
-    const baseOutline = new LineSegments(
-      edgeGeometry,
-      new LineBasicMaterial({ color: '#1c242b' }),
+  const buildPieceViews = (pieces: readonly Piece[]): void => {
+    const placements = layoutOnMat(
+      pieces.map((piece) => {
+        const e = pieceExtents(piece);
+        return { id: piece.id, widthCm: e.width, heightCm: e.height };
+      }),
+      { gapCm: 6, matWidthCm: MAT_WIDTH_CM },
     );
-    const highlight = new LineSegments(
-      edgeGeometry,
-      new LineBasicMaterial({ color: '#ffd166' }),
-    );
-    highlight.visible = false;
+    const placementById = new Map(placements.map((p) => [p.id, p]));
 
-    const marks = new LineSegments(
-      marksGeometry(piece.internal),
-      new LineBasicMaterial({ color: '#24303a' }),
-    );
-    marks.position.y = MARKS_LIFT_CM;
+    for (const piece of pieces) {
+      const extents = pieceExtents(piece);
+      const outlineGeometry = pieceOutlineGeometry(piece);
+      // Move the bbox min-corner to the origin so placement positions the
+      // piece by its layout slot, then lay it flat on the mat (XY → XZ).
+      outlineGeometry.translate(-extents.minX, -extents.minY, 0);
+      outlineGeometry.rotateX(-Math.PI / 2);
 
-    const group = new Group();
-    const placement = placementById.get(piece.id);
-    if (!placement) throw new Error(`no layout for piece ${piece.id}`);
-    // Mat-space placements are 0-based; the mat mesh is centred on the
-    // origin, so the placement must be re-centred or pieces hang off the
-    // mat's right edge.
-    const world = placementToWorld(placement, MAT_WIDTH_CM, MAT_DEPTH_CM);
-    group.position.set(world.xCm, PIECE_LIFT_CM, world.zCm);
-    group.add(mesh, baseOutline, highlight, marks);
-    piecesGroup.add(group);
+      const material = new MeshStandardMaterial({
+        color: project.fabric.color,
+        roughness: 0.85,
+        metalness: 0,
+        // Push the fill behind its outline edges so the cutting line reads.
+        polygonOffset: true,
+        polygonOffsetFactor: 1,
+        polygonOffsetUnits: 1,
+      });
+      const mesh = new Mesh(outlineGeometry, material);
+      mesh.castShadow = true;
+      mesh.userData.pieceId = piece.id;
 
-    views.push({ id: piece.id, group, mesh, material, highlight });
-    meshes.push(mesh);
-    disposables.push(
-      outlineGeometry,
-      material,
-      edgeGeometry,
-      baseOutline.material as LineBasicMaterial,
-      highlight.material as LineBasicMaterial,
-      marks.geometry,
-      marks.material as LineBasicMaterial,
-    );
-  }
+      const edgeGeometry = new EdgesGeometry(outlineGeometry, 10);
+      const baseOutline = new LineSegments(
+        edgeGeometry,
+        new LineBasicMaterial({ color: '#1c242b' }),
+      );
+      const highlight = new LineSegments(
+        edgeGeometry,
+        new LineBasicMaterial({ color: '#ffd166' }),
+      );
+      highlight.visible = false;
+
+      const marks = new LineSegments(
+        marksGeometry(piece.internal),
+        new LineBasicMaterial({ color: '#24303a' }),
+      );
+      marks.position.y = MARKS_LIFT_CM;
+
+      const group = new Group();
+      const placement = placementById.get(piece.id);
+      if (!placement) throw new Error(`no layout for piece ${piece.id}`);
+      // Mat-space placements are 0-based; the mat mesh is centred on the
+      // origin, so the placement must be re-centred or pieces hang off
+      // the mat's right edge.
+      const world = placementToWorld(placement, MAT_WIDTH_CM, MAT_DEPTH_CM);
+      group.position.set(world.xCm, PIECE_LIFT_CM, world.zCm);
+      group.add(mesh, baseOutline, highlight, marks);
+      piecesGroup.add(group);
+
+      views.push({ id: piece.id, group, mesh, material, highlight });
+      meshes.push(mesh);
+      pieceDisposables.push(
+        outlineGeometry,
+        material,
+        edgeGeometry,
+        baseOutline.material as LineBasicMaterial,
+        highlight.material as LineBasicMaterial,
+        marks.geometry,
+        marks.material as LineBasicMaterial,
+      );
+    }
+  };
+
+  buildPieceViews(project.pieces);
+
+  const updatePieces = (pieces: readonly Piece[]): void => {
+    clearPieceViews();
+    buildPieceViews(pieces);
+    // A redrafted piece set can drop ids the selection/hover still name.
+    setHover(null);
+    refreshVisuals();
+  };
 
   // --- Camera + controls (native touch map, set explicitly) --------------
   const controls = new OrbitControls(camera, canvas);
@@ -347,7 +371,8 @@ export function createViewport(options: ViewportOptions): Viewport {
     canvas.removeEventListener('pointerdown', onPointerDown);
     canvas.removeEventListener('pointerup', onPointerUp);
     canvas.removeEventListener('pointercancel', onPointerCancel);
-    for (const d of disposables) d.dispose();
+    for (const d of sharedDisposables) d.dispose();
+    for (const d of pieceDisposables) d.dispose();
     renderer.dispose();
   };
 
@@ -373,5 +398,5 @@ export function createViewport(options: ViewportOptions): Viewport {
     });
   };
 
-  return { applyPreset, pieceScreenPositions, dispose };
+  return { applyPreset, updatePieces, pieceScreenPositions, dispose };
 }
