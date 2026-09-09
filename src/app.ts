@@ -430,7 +430,9 @@ export function mountApp(root: HTMLElement): void {
   // Camera refit: the tap equivalent of the F shortcut. Built once; the
   // mode transitions below decide when it has a viewport to act on.
   refitButtonHandle = createRefitButton(actions, () => viewport?.refit());
-  refitButtonHandle.setEnabled(false); // enabled when the mat mounts
+  // Startup mount (line ~376) runs before the toolbar exists — reflect the
+  // live viewport state here rather than waiting for the next mount.
+  refitButtonHandle.setEnabled(viewport !== null);
 
   addButton('Save', () => {
     try {
