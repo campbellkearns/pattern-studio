@@ -8,6 +8,7 @@
  * gate would reject legitimate drafts.
  */
 import {
+  requireFinite,
   requireNonEmptyString,
   requireNonNegativeInteger,
   requirePositiveInteger,
@@ -38,6 +39,17 @@ export interface SeamStep {
    * omit it, and surfaces fall back to the joined piece names.
    */
   readonly name?: string;
+  /**
+   * Declared relative measured-length ease for this seam, as a fraction of
+   * the longer chain (e.g. 0.15 = the chains may differ up to 15%). Real
+   * seams are eased at sew time by amounts that are properties of the seam
+   * itself — a seat curve absorbs far more ease than a straight side seam —
+   * so a seam whose two sides legitimately differ beyond the engine's
+   * default tolerance declares the amount it will be eased here. The
+   * assembly engine gates each step at `ease ?? SEAM_LENGTH_TOLERANCE`;
+   * omitted means the default gate, so authoring mistakes still fail loudly.
+   */
+  readonly ease?: number;
 }
 
 export function createEdgeChain(input: EdgeChain): EdgeChain {
@@ -80,5 +92,18 @@ export function createSeamStep(input: SeamStep): SeamStep {
       input.name === undefined
         ? undefined
         : requireNonEmptyString(input.name, 'seam name'),
+    ease:
+      input.ease === undefined
+        ? undefined
+        : requireEase(input.ease),
   });
+}
+
+/** A declared ease is a fraction of the longer chain — strictly between 0 and 1. */
+function requireEase(ease: number): number {
+  requireFinite(ease, 'seam ease');
+  if (ease <= 0 || ease >= 1) {
+    throw new Error(`seam ease must be strictly between 0 and 1, got ${ease}`);
+  }
+  return ease;
 }

@@ -379,6 +379,48 @@ describe('plan gates', () => {
     ]);
     expect(() => planAssembly(project)).toThrowError(/at most once/);
   });
+
+  it('sews a further seam of the same join in place (nothing moves)', () => {
+    // Garment sewing order sews several seams of one joined pair: after
+    // the rise folds a onto b, a second a→b seam sews on the already-
+    // folded pair. The step is kept for narration and camera framing,
+    // but places nothing — sweepSign 0 means the pose never changes.
+    const a = rectPiece('a', 10, 20);
+    const b = rectPiece('b', 10, 20);
+    const project = projectOf([a, b], [
+      seam(
+        'a',
+        { pieceId: 'a', startVertex: 1, edgeCount: 1 },
+        'b',
+        { pieceId: 'b', startVertex: 3, edgeCount: 1 },
+        1,
+      ),
+      seam(
+        'a',
+        { pieceId: 'a', startVertex: 2, edgeCount: 1 },
+        'b',
+        { pieceId: 'b', startVertex: 0, edgeCount: 1 },
+        2,
+      ),
+    ]);
+    const plan = planAssembly(project);
+    expect(plan.steps).toHaveLength(2);
+    expect(plan.steps[1]!.moverGroup).toEqual(['a']);
+    expect(plan.steps[1]!.sweepSign).toBe(0);
+
+    // Scrubbing the sew-in-place step moves nothing: the pose at the end
+    // of step 2 (fully folded) equals the pose after step 1, at any t.
+    const afterStep1 = evaluateAssemblyPose(plan, 0, 1);
+    for (const t of [0, 0.5, 1]) {
+      const atT = evaluateAssemblyPose(plan, 1, t);
+      expect(pointAt(atT.get('a')!, new Vector3(3, 10, 0))).toEqual(
+        pointAt(afterStep1.get('a')!, new Vector3(3, 10, 0)),
+      );
+      expect(pointAt(atT.get('b')!, new Vector3(5, 10, 0))).toEqual(
+        pointAt(afterStep1.get('b')!, new Vector3(5, 10, 0)),
+      );
+    }
+  });
 });
 
 describe('fold groups', () => {

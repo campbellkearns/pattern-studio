@@ -7,15 +7,17 @@ import {
   TITAN_PANTS_TEMPLATE,
 } from '../engine/titanSettings';
 import {
-  BACK_CHAINS,
-  FRONT_CHAINS,
-  LEG_VERTEX_COUNT,
   outlineHeightCm,
   pantsAuxPieces,
   pantsStarter,
   redraftPantsStarter,
   WAISTBAND_CHAINS,
 } from './pantsStarter';
+import {
+  measureLegSeams,
+  resolveFrontChains,
+  resolveLegChains,
+} from './pantsSeams';
 import { STARTERS, starterById } from './starters';
 import { chainLength, outlineVertices } from './pantsGeometry';
 
@@ -25,9 +27,16 @@ function legOf(pieces: readonly Piece[], id: string): Piece {
   return leg;
 }
 
-const STARTER_PIECES = redraftPantsStarter(TITAN_PANTS_TEMPLATE);
-const LEGS = STARTER_PIECES.slice(0, 2);
-const AUX = pantsAuxPieces(TITAN_PANTS_TEMPLATE);
+/** Auxiliaries sized from a fresh draft at the given measurements —
+ * the sizing reads measured seam geometry, never vertex indices. */
+function auxFor(measurements: PantMeasurements): Piece[] {
+  const [front, back] = redraftPantsStarter(measurements).pieces;
+  return pantsAuxPieces(measureLegSeams(front, back));
+}
+
+const STARTER_DRAFT = redraftPantsStarter(TITAN_PANTS_TEMPLATE);
+const LEGS = STARTER_DRAFT.pieces.slice(0, 2);
+const AUX = auxFor(TITAN_PANTS_TEMPLATE);
 
 /** Relative difference of two seam edges — real seams get eased, not equal. */
 function lengthGap(a: number, b: number): number {
@@ -37,16 +46,21 @@ function lengthGap(a: number, b: number): number {
 describe('pants leg edge anatomy', () => {
   const legs = LEGS;
 
-  it('pins the 7-vertex leg anatomy the seam chains and aux sizing rely on', () => {
+  it('drafts 7-vertex legs at the template (topology may shift at extremes)', () => {
+    // The resolver reads landmark geometry, not vertex indices, so the
+    // anatomy is no longer pinned across the range — but the template
+    // block's shape is still the fixture the aux formulas were tuned to.
     for (const leg of legs) {
-      expect(pathVertexCount(leg.outline)).toBe(LEG_VERTEX_COUNT);
+      expect(pathVertexCount(leg.outline)).toBe(7);
     }
   });
 
   it('measures the two waist edges to about half the eased waist circumference', () => {
+    const front = legOf(legs, 'pants-front');
+    const back = legOf(legs, 'pants-back');
     const halfWaist =
-      chainLength(legOf(legs, 'pants-front').outline, FRONT_CHAINS.waist) +
-      chainLength(legOf(legs, 'pants-back').outline, BACK_CHAINS.waist);
+      measureLegSeams(front, back).frontWaistCm +
+      measureLegSeams(front, back).backWaistCm;
     const waist = halfWaist * 2;
     const { waistCm, waistEasePct } = TITAN_PANTS_TEMPLATE;
     const easedWaist = waistCm * (1 + waistEasePct / 100);
@@ -58,21 +72,23 @@ describe('pants leg edge anatomy', () => {
   it('matches the leg-to-leg seams within easable tolerances', () => {
     const front = legOf(legs, 'pants-front');
     const back = legOf(legs, 'pants-back');
+    const frontChains = resolveFrontChains(front);
+    const backChains = resolveLegChains(back);
     // The rise chains run waist-to-fork on both legs, but the front's is
     // nearly straight while the back's wraps the seat curve — chords diverge
     // well beyond a sewable tolerance. Keep only a gross-wrong-edge guard;
     // the outseam/inseam below carry the real equality signal.
     expect(
       lengthGap(
-        chainLength(front.outline, FRONT_CHAINS.rise),
-        chainLength(back.outline, BACK_CHAINS.rise),
+        chainLength(front.outline, frontChains.rise),
+        chainLength(back.outline, backChains.rise),
       ),
     ).toBeLessThan(0.45);
     for (const seam of ['outseam', 'inseam'] as const) {
       expect(
         lengthGap(
-          chainLength(front.outline, FRONT_CHAINS[seam]),
-          chainLength(back.outline, BACK_CHAINS[seam]),
+          chainLength(front.outline, frontChains[seam]),
+          chainLength(back.outline, backChains[seam]),
         ),
       ).toBeLessThan(0.05);
     }
@@ -128,7 +144,7 @@ describe('pants aux pieces', () => {
       waistCm: TITAN_PANTS_TEMPLATE.waistCm + 10,
     };
     const bandBefore = AUX.find((p) => p.id === 'waistband')!;
-    const bandAfter = pantsAuxPieces(grown).find((p) => p.id === 'waistband')!;
+    const bandAfter = auxFor(grown).find((p) => p.id === 'waistband')!;
     // Band length = the x-span of its outline vertices.
     const bandLengthOf = (piece: Piece): number => {
       const xs = outlineVertices(piece.outline).map((v) => v.x);
@@ -145,9 +161,10 @@ describe('pants aux pieces', () => {
     const mouth = outlineVertices(
       AUX.find((p) => p.id === 'pocket-bag')!.outline,
     )[1];
+    const front = legOf(LEGS, 'pants-front');
     const frontWaist = chainLength(
-      legOf(LEGS, 'pants-front').outline,
-      FRONT_CHAINS.waist,
+      front.outline,
+      resolveFrontChains(front).waist,
     );
     // The formula reproduces the measured front waist edge within ~0.2%.
     expect(mouth.x).toBeCloseTo(frontWaist * 1.2, 1);
@@ -172,33 +189,37 @@ describe('live redraft across the panel ranges', () => {
       }
     }
     for (const measurements of extremes) {
-      const pieces = redraftPantsStarter(measurements);
+      const pieces = redraftPantsStarter(measurements).pieces;
       expect(pieces).toHaveLength(5);
       for (const piece of pieces) {
         expect(() => createPiece(piece)).not.toThrow();
       }
-      // The named chains must stay in bounds at every extreme.
+      // The named seams must resolve from the draft's geometry at every
+      // extreme — including the topology-shifting ones — and measure
+      // positive; no fixed index can go stale.
       const front = legOf(pieces, 'pants-front');
       const back = legOf(pieces, 'pants-back');
-      for (const chain of Object.values(FRONT_CHAINS)) {
-        expect(() => chainLength(front.outline, chain)).not.toThrow();
+      const frontChains = resolveFrontChains(front);
+      const backChains = resolveLegChains(back);
+      for (const run of Object.values(frontChains)) {
+        expect(chainLength(front.outline, run)).toBeGreaterThan(0);
       }
-      for (const chain of Object.values(BACK_CHAINS)) {
-        expect(() => chainLength(back.outline, chain)).not.toThrow();
+      for (const run of Object.values(backChains)) {
+        expect(chainLength(back.outline, run)).toBeGreaterThan(0);
       }
     }
   });
 
   it('moves the legs when measurements move (front tracks the adapter)', () => {
     const before = legOf(
-      redraftPantsStarter(TITAN_PANTS_TEMPLATE),
+      redraftPantsStarter(TITAN_PANTS_TEMPLATE).pieces,
       'pants-front',
     );
     const after = legOf(
       redraftPantsStarter({
         ...TITAN_PANTS_TEMPLATE,
         inseamCm: TITAN_PANTS_TEMPLATE.inseamCm - 10,
-      }),
+      }).pieces,
       'pants-front',
     );
     expect(outlineHeightCm(after.outline)).toBeLessThan(
@@ -275,9 +296,10 @@ describe('pants assembly (ordered seam steps)', () => {
       starter.pieces.find((p) => p.id === 'waistband')!.outline,
       WAISTBAND_CHAINS.front,
     );
+    const front = legOf(LEGS, 'pants-front');
     const frontWaist = chainLength(
-      legOf(LEGS, 'pants-front').outline,
-      FRONT_CHAINS.waist,
+      front.outline,
+      resolveFrontChains(front).waist,
     );
     expect(lengthGap(bandQuarter, frontWaist)).toBeLessThan(0.05);
   });
