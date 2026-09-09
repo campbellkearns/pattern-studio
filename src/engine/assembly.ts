@@ -71,9 +71,10 @@ export interface AssemblyStepPlan {
   readonly hinge: Hinge;
   /**
    * Sign of the scrub rotation about the hinge, chosen so the fold sweeps
-   * up out of the mat rather than through it.
+   * up out of the mat rather than through it. 0 marks a sew-in-place
+   * step: nothing rotates, the step exists for narration and framing.
    */
-  readonly sweepSign: 1 | -1;
+  readonly sweepSign: 1 | -1 | 0;
   /**
    * The anchor's chain sampled in world space at this step's start — the
    * view draws this as the highlighted seam line.
@@ -443,16 +444,19 @@ export function planAssembly(project: Project, options: PlanOptions = {}): Assem
     }
 
     // Measured-length gate: eased seams tolerated, authoring errors not.
+    // A step may declare a larger ease (a seat curve absorbs more ease than
+    // a straight seam); undeclared steps keep the default gate.
+    const tolerance = step.ease ?? SEAM_LENGTH_TOLERANCE;
     const moverLength = chainMeasuredLength(mover, step.edges[0]);
     const anchorLength = chainMeasuredLength(anchor, step.edges[1]);
     const longest = Math.max(moverLength, anchorLength);
     if (
       !Number.isFinite(longest) ||
       longest <= 0 ||
-      Math.abs(moverLength - anchorLength) > SEAM_LENGTH_TOLERANCE * longest
+      Math.abs(moverLength - anchorLength) > tolerance * longest
     ) {
       throw new Error(
-        `seam step ${step.order}: seam chains differ in measured length by more than ${SEAM_LENGTH_TOLERANCE * 100}% — mover ${moverLength.toFixed(2)} cm vs anchor ${anchorLength.toFixed(2)} cm`,
+        `seam step ${step.order}: seam chains differ in measured length by more than ${tolerance * 100}% — mover ${moverLength.toFixed(2)} cm vs anchor ${anchorLength.toFixed(2)} cm`,
       );
     }
 
@@ -470,11 +474,6 @@ export function planAssembly(project: Project, options: PlanOptions = {}): Assem
       placed.set(anchorId, anchorPose);
       rootAnchorsPlaced += 1;
     }
-    if (foldedAsMover.has(moverId)) {
-      throw new Error(
-        `seam step ${step.order}: piece "${mover.name}" already folded as a mover — v1 folds each piece as a mover at most once`,
-      );
-    }
 
     const moverChainLocal = chainPolyline(mover, step.edges[0]).map(
       (p) => new Vector3(p.x, p.y, 0),
@@ -484,6 +483,33 @@ export function planAssembly(project: Project, options: PlanOptions = {}): Assem
       anchorPose,
     );
     const hinge = hingeFromChain(anchorChainWorldPoints);
+
+    if (foldedAsMover.has(moverId)) {
+      // v1 folds each piece as a mover at most once — a fresh fold of a
+      // placed piece would be an ambiguous re-placement. One exception:
+      // sewing a further seam of a join that already exists. Garment
+      // sewing order sews several seams of the same joined pair (after
+      // the rise folds the front onto the back, the side seams and
+      // inseam sew on the already-folded pair) — the pieces are in
+      // contact, so the step sews in place: nothing moves, and the
+      // walkthrough narrates and frames the seam. A placed piece asked
+      // to join a different component stays an error.
+      if (unionRoot(roots, moverId) !== unionRoot(roots, anchorId)) {
+        throw new Error(
+          `seam step ${step.order}: piece "${mover.name}" already folded as a mover — v1 folds each piece as a mover at most once`,
+        );
+      }
+      const currentPose = placed.get(moverId)!;
+      moverFlatPose.set(moverId, currentPose);
+      stepPlans.push({
+        step,
+        moverGroup: [moverId],
+        hinge,
+        sweepSign: 0,
+        anchorChainWorld: anchorChainWorldPoints,
+      });
+      continue;
+    }
 
     const moverCentreLocal = new Vector3(
       outlineBBoxCentre(mover).x,

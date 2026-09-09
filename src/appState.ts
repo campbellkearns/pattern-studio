@@ -25,7 +25,7 @@
  * the meaningful line.
  */
 
-import type { FabricSpec, Piece, Project } from './model';
+import type { FabricSpec, Piece, Project, SeamStep } from './model';
 
 /** Which scene currently owns the canvas. */
 export type AppMode = 'mat' | 'assembly';
@@ -137,11 +137,15 @@ export function applyFabric(state: AppState, spec: FabricSpec): TransitionResult
 /**
  * Redrafted pieces write through to the project. A selection naming a piece
  * the redraft dropped is cleared here — the model can never hold a ghost id
- * for the status bar to narrate.
+ * for the status bar to narrate. An optional resolved assembly rides along
+ * (pants): its seam chains are properties of the draft, so replacing the
+ * pieces without replacing the assembly would leave stale chain indices
+ * behind — the same fixed-index staleness UX-15 fixes at the source.
  */
 export function redraftPieces(
   state: AppState,
   pieces: readonly Piece[],
+  assembly?: readonly SeamStep[],
 ): TransitionResult {
   const selectedId =
     state.selectedId !== null &&
@@ -149,8 +153,12 @@ export function redraftPieces(
       ? state.selectedId
       : null;
   const selectionDropped = state.selectedId !== null && selectedId === null;
+  const project: Project =
+    assembly === undefined
+      ? { ...state.project, pieces }
+      : { ...state.project, pieces, assembly };
   return {
-    state: { ...state, project: { ...state.project, pieces }, selectedId },
+    state: { ...state, project, selectedId },
     effects: {
       ...NO_EFFECTS,
       piecesRedrafted: pieces,

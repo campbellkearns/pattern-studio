@@ -340,10 +340,17 @@ export function mountApp(root: HTMLElement): void {
           // without a declared schema.
           if (!redraft) return;
           try {
-            const pieces = redraft(values);
+            // Assembly-aware starters (pants) resolve their chains from
+            // the fresh draft; the pieces are the same set redraft
+            // returns. Plain starters plan from the project's static
+            // assembly as before.
+            const result =
+              entry?.redraftAssembly?.(values) ?? { pieces: redraft(values) };
             // The redraft writes through the model, so Save/Export capture
             // what is on the mat and the live scene (either mode) follows.
-            dispatch(redraftPieces(state, pieces));
+            // A resolved assembly rides along — its chains are properties
+            // of the fresh draft.
+            dispatch(redraftPieces(state, result.pieces, result.assembly));
             measurementsHandle?.showDraftError(null);
           } catch (error) {
             // Never swallow: surface the failure next to the fields,

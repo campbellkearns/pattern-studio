@@ -22,6 +22,7 @@ import type {
   ParameterValues,
   Piece,
   Project,
+  SeamStep,
   StarterProject,
 } from '../model';
 import { PANTS_PARAMETERS, toPantMeasurements } from '../engine/titanSettings';
@@ -41,8 +42,19 @@ export interface StarterEntry {
    * panel renders exactly these, and nothing else. */
   readonly parameters: ParameterSchema;
   /** Live redraft at the given parameter values. Present exactly when
-   * parameters is non-empty (registry invariant, tested). */
+   * parameters is non-empty (registry invariant, tested); returns the
+   * redrafted piece set. */
   readonly redraft?: (values: ParameterValues) => readonly Piece[];
+  /** Draft-and-resolve in one call for starters whose seam chains depend
+   * on the draft's geometry (pants): returns the fresh pieces AND the
+   * assembly resolved from that same draft, so a redraft never leaves
+   * stale chain indices behind. Present exactly when redraft is, and
+   * every piece redraft() returns is a piece this returns — callers that
+   * want assembly-aware redrafting prefer this over redraft. */
+  readonly redraftAssembly?: (values: ParameterValues) => {
+    readonly pieces: readonly Piece[];
+    readonly assembly?: readonly SeamStep[];
+  };
 }
 
 export const STARTERS: readonly StarterEntry[] = [
@@ -69,7 +81,9 @@ export const STARTERS: readonly StarterEntry[] = [
     name: 'Pants',
     build: () => pantsStarter(),
     parameters: PANTS_PARAMETERS,
-    redraft: (values) => redraftPantsStarter(toPantMeasurements(values)),
+    redraft: (values) => redraftPantsStarter(toPantMeasurements(values)).pieces,
+    redraftAssembly: (values) =>
+      redraftPantsStarter(toPantMeasurements(values)),
   },
 ];
 
