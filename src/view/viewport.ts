@@ -13,6 +13,7 @@ import {
   Color,
   DirectionalLight,
   EdgesGeometry,
+  Fog,
   Group,
   HemisphereLight,
   LineBasicMaterial,
@@ -36,6 +37,8 @@ import { layoutOnMat, placementToWorld } from './layout';
 import {
   MAT_DEPTH_CM,
   MAT_WIDTH_CM,
+  ROOM_FOG_FAR_CM,
+  ROOM_FOG_NEAR_CM,
   paperSurfaceExtentCm,
   surfaceHeightCm,
   workBoundsCm,
@@ -102,6 +105,10 @@ export function createViewport(options: ViewportOptions): Viewport {
 
   const scene = new Scene();
   scene.background = new Color(SCENE.background);
+  // Soft room-air fade (UX-04): distant geometry dissolves into the
+  // drafting-room backdrop, giving the workroom depth without extra
+  // geometry — the work area itself stays crisp (fog starts well beyond it).
+  scene.fog = new Fog(SCENE.background, ROOM_FOG_NEAR_CM, ROOM_FOG_FAR_CM);
 
   const camera = new PerspectiveCamera(40, 1, 0.5, 4000);
 

@@ -16,6 +16,7 @@ import {
   Color,
   DirectionalLight,
   EdgesGeometry,
+  Fog,
   Group,
   HemisphereLight,
   Line,
@@ -52,6 +53,7 @@ import {
   seamIsCurved,
 } from './walkthroughMotion';
 import { createSurfaceMeshes } from './surfaceMeshes';
+import { ROOM_FOG_FAR_CM, ROOM_FOG_NEAR_CM } from './matSurface';
 import {
   applyGrainlineUVs,
   marksGeometry,
@@ -107,6 +109,8 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
 
   const scene = new Scene();
   scene.background = new Color(SCENE.background);
+  // Soft room-air fade (UX-04), same workroom as the viewport.
+  scene.fog = new Fog(SCENE.background, ROOM_FOG_NEAR_CM, ROOM_FOG_FAR_CM);
 
   const camera = new PerspectiveCamera(40, 1, 0.5, 4000);
 

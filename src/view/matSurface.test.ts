@@ -6,6 +6,12 @@ import {
   PAPER_MARGIN_CM,
   PAPER_SURFACE_Y_CM,
   MAT_SURFACE_Y_CM,
+  ROOM_FOG_FAR_CM,
+  ROOM_FOG_NEAR_CM,
+  TABLE_DEPTH_CM,
+  TABLE_THICKNESS_CM,
+  TABLE_TOP_Y_CM,
+  TABLE_WIDTH_CM,
   paperBoundsCm,
   paperSurfaceExtentCm,
   surfaceHeightCm,
@@ -58,6 +64,31 @@ describe('surfaceHeightCm', () => {
     expect(PAPER_SURFACE_Y_CM).toBe(-0.15);
     expect(surfaceHeightCm('mat')).toBe(MAT_SURFACE_Y_CM);
     expect(surfaceHeightCm('paper')).toBe(PAPER_SURFACE_Y_CM);
+  });
+});
+
+describe('workroom environment (UX-04)', () => {
+  it('extends the table comfortably beyond the mat on every side', () => {
+    expect(TABLE_WIDTH_CM).toBeGreaterThan(MAT_WIDTH_CM);
+    expect(TABLE_DEPTH_CM).toBeGreaterThan(MAT_DEPTH_CM);
+  });
+
+  it('puts the tabletop below the paper so mat and paper rest on it', () => {
+    expect(TABLE_TOP_Y_CM).toBeLessThan(PAPER_SURFACE_Y_CM);
+  });
+
+  it('gives the slab a positive thickness that reads as a surface', () => {
+    expect(TABLE_THICKNESS_CM).toBeGreaterThan(0);
+  });
+
+  it('starts the room fade beyond the mat’s farthest corner', () => {
+    // The fog must never touch the work: its near plane sits past the
+    // mat's corner radius (hypot(150, 100) ≈ 180 cm from centre).
+    expect(ROOM_FOG_NEAR_CM).toBeGreaterThan(
+      Math.hypot(MAT_WIDTH_CM, MAT_DEPTH_CM),
+    );
+    // A wide fade window keeps the dissolve soft, not a hard wall.
+    expect(ROOM_FOG_FAR_CM).toBeGreaterThan(2 * ROOM_FOG_NEAR_CM);
   });
 });
 

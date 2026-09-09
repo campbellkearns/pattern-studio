@@ -77,4 +77,13 @@ export const SCENE = {
   seam: CUTTING_MAT_GREEN,
   hoverEmissive: HOVER_EMISSIVE,
   selectEmissive: SELECT_EMISSIVE,
+  /**
+   * Workroom table top (UX-04): Blueprint Tint deepened 62% toward Grid
+   * Azure — a lerp of two tokens stays inside their shared hue ramp, so
+   * the workroom adds no sixth hue. The mat's cool green reads against it
+   * as resting on a surface instead of floating in the backdrop.
+   */
+  tableTop: '#B4C6E6',
+  /** Table edge/apron faces: tableTop deepened 40% toward Azure Line. */
+  tableEdge: '#8CA2C9',
 } as const;
