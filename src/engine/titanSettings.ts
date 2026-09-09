@@ -18,6 +18,8 @@
  * and the knee stays proportional to the leg, wherever the hem goes.
  */
 import { cisMaleAdult40 } from '@freesewing/models';
+import { createParameterSchema, createParameterSpec } from '../model/parameters';
+import type { ParameterSchema, ParameterValues } from '../model/parameters';
 
 /** Learner-facing measurement fields — the R3-capped set of 8. */
 export interface PantMeasurements {
@@ -71,6 +73,100 @@ export const TITAN_PANTS_TEMPLATE: PantMeasurements = {
   kneeEasePct: 6,
   crotchDropPct: 2,
 };
+
+/** Pedagogical labels + per-field fit explainers (blueprint F4) — declared
+ * beside the ranges so the learner-facing schema and the engine share one
+ * source of truth for bounds and defaults. */
+const PANTS_FIELD_META: {
+  readonly [K in keyof PantMeasurements]: {
+    readonly label: string;
+    readonly explainer: string;
+    readonly unit: string;
+  };
+} = {
+  waistCm: {
+    label: 'Waist',
+    explainer: 'Body circumference where the waistband sits.',
+    unit: 'cm',
+  },
+  hipCm: {
+    label: 'Hip',
+    explainer: 'Circumference at the fullest point of the seat.',
+    unit: 'cm',
+  },
+  risePct: {
+    label: 'Rise',
+    explainer:
+      'Where the waistband sits: 100 = natural waist, lower rides on the hips.',
+    unit: '%',
+  },
+  inseamCm: {
+    label: 'Inseam',
+    explainer: 'Crotch to hem, measured along the inner leg.',
+    unit: 'cm',
+  },
+  easePct: {
+    label: 'Seat ease',
+    explainer: 'Wearing ease added across the seat.',
+    unit: '%',
+  },
+  waistEasePct: {
+    label: 'Waist ease',
+    explainer: 'Wearing ease added at the waistband.',
+    unit: '%',
+  },
+  kneeEasePct: {
+    label: 'Knee ease',
+    explainer: 'Extra width at the knee for bending the leg.',
+    unit: '%',
+  },
+  crotchDropPct: {
+    label: 'Crotch depth',
+    explainer: 'Extra depth below the fork so the pants can move.',
+    unit: '%',
+  },
+};
+
+/** The pants starter's declared adjustable parameters (UX-03): the
+ * R3-capped 8-field set, projected from the engine's own ranges and
+ * template so the panel can never drift from the adapter on bounds or
+ * defaults. This is one schema among others — starters declare theirs. */
+export const PANTS_PARAMETERS: ParameterSchema = createParameterSchema(
+  (Object.keys(PANT_MEASUREMENT_RANGES) as Array<keyof PantMeasurements>).map(
+    (key) =>
+      createParameterSpec({
+        key,
+        label: PANTS_FIELD_META[key].label,
+        explainer: PANTS_FIELD_META[key].explainer,
+        unit: PANTS_FIELD_META[key].unit,
+        min: PANT_MEASUREMENT_RANGES[key].min,
+        max: PANT_MEASUREMENT_RANGES[key].max,
+        step: PANT_MEASUREMENT_RANGES[key].step,
+        value: TITAN_PANTS_TEMPLATE[key],
+      }),
+  ),
+);
+
+/**
+ * Schema-value record → typed measurements (the UX-03 boundary): the panel
+ * speaks ParameterValues, Titan needs PantMeasurements. The mapping is
+ * explicit — every PANTS_PARAMETERS key is a PantMeasurements key — and a
+ * missing or non-finite key fails in clampMeasurements (MeasurementError)
+ * rather than silently defaulting, so a bad redraft is narrated and the
+ * last valid pattern stays on the mat.
+ */
+export function toPantMeasurements(values: ParameterValues): PantMeasurements {
+  return clampMeasurements({
+    waistCm: values.waistCm,
+    hipCm: values.hipCm,
+    risePct: values.risePct,
+    inseamCm: values.inseamCm,
+    easePct: values.easePct,
+    waistEasePct: values.waistEasePct,
+    kneeEasePct: values.kneeEasePct,
+    crotchDropPct: values.crotchDropPct,
+  });
+}
 
 /** Body constants from the size-40 model (mm) that Titan needs but the panel
  * does not expose — crotch depth is a body fact, not a style choice here. */

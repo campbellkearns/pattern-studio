@@ -10,6 +10,7 @@
  * pattern on the mat.
  */
 import { starterById, STARTERS } from './data/starters';
+import { EMPTY_PARAMETERS } from './model';
 import type { Project } from './model';
 import {
   loadProject,
@@ -34,13 +35,12 @@ import {
 } from './view/shortcuts';
 import { statusClassName } from './view/statusTone';
 import type { StatusTone } from './view/statusTone';
-import { TITAN_PANTS_TEMPLATE } from './engine/titanSettings';
-import { redraftPants } from './engine/titanPants';
 import { createAssemblyControls } from './view/assemblyControls';
 import type { AssemblyControlsHandle } from './view/assemblyControls';
 import { createAssemblyView } from './view/assemblyView';
 import type { AssemblyView } from './view/assemblyView';
 import { createMeasurementsPanel } from './view/measurementsPanel';
+import type { MeasurementsPanelHandle } from './view/measurementsPanel';
 import { createPiecePanel } from './view/panel';
 import type { PanelHandle } from './view/panel';
 import { supportsWebGL2 } from './view/webgl';
@@ -216,6 +216,7 @@ export function mountApp(root: HTMLElement): void {
   let assemblyControls: AssemblyControlsHandle | null = null;
   let panelHandle: PanelHandle | null = null;
   let fabricHandle: { dispose(): void } | null = null;
+  let measurementsHandle: MeasurementsPanelHandle | null = null;
   let unsubscribe: (() => void) | null = null;
   let assembleButton: HTMLButtonElement | null = null;
 
@@ -235,6 +236,7 @@ export function mountApp(root: HTMLElement): void {
     unsubscribe?.();
     panelHandle?.dispose();
     fabricHandle?.dispose();
+    measurementsHandle?.dispose();
     teardownAssemblyMode();
     viewport?.dispose();
     currentProject = project;
@@ -242,7 +244,8 @@ export function mountApp(root: HTMLElement): void {
     projectTitle.textContent = project.name;
     // Keep the picker honest: a saved/imported project that is not a
     // starter deselects it rather than lying about provenance.
-    starterPicker.value = starterById(project.id)?.id ?? '';
+    const entry = starterById(project.id);
+    starterPicker.value = entry?.id ?? '';
 
     canvasHolder.innerHTML = '';
     const canvas = document.createElement('canvas');
@@ -279,6 +282,40 @@ export function mountApp(root: HTMLElement): void {
         else viewport?.applyFabric(spec);
       },
     });
+    // Measurements panel: re-created per project from THAT project's
+    // declared parameter schema (UX-03) — the notebook holder never shows
+    // pants fields, and a project with no parameters gets the narrated
+    // empty state. A failed draft keeps the last valid pattern on the mat.
+    measurementsHandle = createMeasurementsPanel(
+      measurementsSection,
+      entry?.parameters ?? EMPTY_PARAMETERS,
+      {
+        onRedraft: (values) => {
+          const redraft = entry?.redraft;
+          // Unreachable through the UI — no parameters means no fields to
+          // edit — but the guard keeps the contract honest: no redraft
+          // without a declared schema.
+          if (!redraft) return;
+          try {
+            const pieces = redraft(values);
+            // The redraft edits the live project's pieces, so Save/Export
+            // capture what is on the mat.
+            currentProject = { ...currentProject, pieces };
+            viewport?.updatePieces(pieces);
+            panelHandle?.updatePieces(pieces);
+            measurementsHandle?.showDraftError(null);
+          } catch (error) {
+            // Never swallow: surface the failure next to the fields,
+            // keeping the last valid draft on the mat.
+            console.error('redraft failed', error);
+            measurementsHandle?.showDraftError(
+              'Could not redraft with those measurements — ' +
+                'the last valid pattern is still shown. Adjust and try again.',
+            );
+          }
+        },
+      },
+    );
     unsubscribe = selection.subscribe(renderStatus);
     renderStatus(selection.get());
   };
@@ -368,43 +405,6 @@ export function mountApp(root: HTMLElement): void {
 
   mountProject(startup.project);
   narrate(startup.message);
-
-  // --- Measurements (M2: live parametric redraft) --------------------------
-  // The panel owns input state and the engine owns drafting; this shell
-  // keeps the viewport, piece list, and live project in sync. A failed
-  // draft never reaches the mat — the last valid pieces stay and the
-  // panel surfaces what went wrong (blueprint error state).
-  const measurementsPanel = createMeasurementsPanel(
-    measurementsSection,
-    TITAN_PANTS_TEMPLATE,
-    {
-      onRedraft: (measurements) => {
-        try {
-          // Starter-backed projects redraft their own full piece set (the
-          // pants starter's auxiliaries track the measurements too); any
-          // other project keeps main's behavior — Titan legs replace the
-          // pieces so measurements still drive something real.
-          const pieces =
-            starterById(currentProject.id)?.redraft(measurements) ??
-            redraftPants(measurements);
-          // The redraft edits the live project's pieces, so Save/Export
-          // capture what is on the mat.
-          currentProject = { ...currentProject, pieces };
-          viewport?.updatePieces(pieces);
-          panelHandle?.updatePieces(pieces);
-          measurementsPanel.showDraftError(null);
-        } catch (error) {
-          // Never swallow: surface the failure next to the fields,
-          // keeping the last valid draft on the mat.
-          console.error('redraft failed', error);
-          measurementsPanel.showDraftError(
-            'Could not redraft with those measurements — ' +
-              'the last valid pattern is still shown. Adjust and try again.',
-          );
-        }
-      },
-    },
-  );
 
   // --- Toolbar (F7: projects as data) -------------------------------------
   const addButton = (label: string, onClick: () => void): HTMLButtonElement => {
@@ -561,7 +561,7 @@ export function mountApp(root: HTMLElement): void {
   window.addEventListener('pagehide', () => {
     unsubscribe?.();
     fabricHandle?.dispose();
-    measurementsPanel.dispose();
+    measurementsHandle?.dispose();
     panelHandle?.dispose();
     teardownAssemblyMode();
     viewport?.dispose();

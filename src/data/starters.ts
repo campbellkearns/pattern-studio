@@ -1,22 +1,30 @@
 /**
  * The starter registry (blueprint starter ladder): every selectable starter
- * in one place, each able to build a fresh validated StarterProject and to
- * redraft its pieces at arbitrary measurements. The app shell reads this
- * list — adding a starter is a data change, not an app-shell change.
+ * in one place, each able to build a fresh validated StarterProject, to
+ * declare its own adjustable parameters (UX-03), and — when it has any — to
+ * redraft its pieces at given parameter values. The app shell reads this
+ * list: adding a starter is a data change, not an app-shell change, and the
+ * measurements panel renders exactly the active starter's schema.
  *
- * redraft() semantics per entry:
- * - Notebook holder: the M2 parametric redraft (measurements drive Titan
- *   legs on top of the hand-authored starter — main's behavior, kept).
- * - Toiletry rollup / Tote: fixed-size starters (the blueprint's starter
- *   spec defines no dimensions for these rungs) — redraft ignores the
- *   measurements and returns a fresh copy of the same fixed pieces.
+ * Parameters/redraft semantics per entry:
  * - Pants: the full pants set — adapter legs plus the measurement-sized
- *   auxiliaries, so the waistband/fly shield/pocket bag track the panel.
+ *   auxiliaries; its eight declared parameters redraft everything live.
+ * - Notebook holder / Toiletry rollup / Tote: no adjustable parameters —
+ *   hand-authored or fixed-size starters (the blueprint's starter spec
+ *   defines no dimensions for these rungs). The measurements panel shows
+ *   its narrated empty state and the pieces never change; in particular
+ *   the notebook holder no longer pretends to drive Titan legs (the
+ *   pre-UX-03 mis-wiring this ticket removes).
  */
-import { createStarterProject } from '../model';
-import type { Piece, Project, StarterProject } from '../model';
-import { redraftPants } from '../engine/titanPants';
-import type { PantMeasurements } from '../engine/titanSettings';
+import { createStarterProject, EMPTY_PARAMETERS } from '../model';
+import type {
+  ParameterSchema,
+  ParameterValues,
+  Piece,
+  Project,
+  StarterProject,
+} from '../model';
+import { PANTS_PARAMETERS, toPantMeasurements } from '../engine/titanSettings';
 import { NOTEBOOK_HOLDER_STARTER } from './notebookHolder';
 import { TOILETRY_ROLLUP_STARTER } from './toiletryRollup';
 import { TOTE_STARTER } from './tote';
@@ -29,8 +37,12 @@ export interface StarterEntry {
   readonly name: string;
   /** A fresh, validated starter instance (never hand the same object twice). */
   readonly build: () => StarterProject;
-  /** Pieces for the live redraft at the given measurements. */
-  readonly redraft: (measurements: PantMeasurements) => readonly Piece[];
+  /** This starter's declared adjustable parameters — the measurements
+   * panel renders exactly these, and nothing else. */
+  readonly parameters: ParameterSchema;
+  /** Live redraft at the given parameter values. Present exactly when
+   * parameters is non-empty (registry invariant, tested). */
+  readonly redraft?: (values: ParameterValues) => readonly Piece[];
 }
 
 export const STARTERS: readonly StarterEntry[] = [
@@ -38,25 +50,26 @@ export const STARTERS: readonly StarterEntry[] = [
     id: 'starter-notebook-holder',
     name: 'Notebook holder',
     build: () => createStarterProject(NOTEBOOK_HOLDER_STARTER),
-    redraft: (measurements) => redraftPants(measurements),
+    parameters: EMPTY_PARAMETERS,
   },
   {
     id: 'starter-toiletry-rollup',
     name: 'Toiletry rollup',
     build: () => createStarterProject(TOILETRY_ROLLUP_STARTER),
-    redraft: () => createStarterProject(TOILETRY_ROLLUP_STARTER).pieces,
+    parameters: EMPTY_PARAMETERS,
   },
   {
     id: 'starter-tote',
     name: 'Tote',
     build: () => createStarterProject(TOTE_STARTER),
-    redraft: () => createStarterProject(TOTE_STARTER).pieces,
+    parameters: EMPTY_PARAMETERS,
   },
   {
     id: 'starter-pants',
     name: 'Pants',
     build: () => pantsStarter(),
-    redraft: (measurements) => redraftPantsStarter(measurements),
+    parameters: PANTS_PARAMETERS,
+    redraft: (values) => redraftPantsStarter(toPantMeasurements(values)),
   },
 ];
 

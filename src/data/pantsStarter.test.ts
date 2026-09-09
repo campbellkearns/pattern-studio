@@ -304,12 +304,18 @@ describe('starter registry', () => {
     ]);
   });
 
-  it('builds validated instances and redrafts full piece sets', () => {
+  it('builds validated instances and redrafts schema-driven piece sets', () => {
     for (const entry of STARTERS) {
       const built = entry.build();
       expect(built.id).toBe(entry.id);
       expect(built.assembly).toBeDefined();
-      const redrafted = entry.redraft(TITAN_PANTS_TEMPLATE);
+      // Redrafting is a parameter-schema feature (UX-03): entries without
+      // declared parameters have no redraft — the panel shows its narrated
+      // empty state and the pieces never change.
+      if (!entry.redraft) continue;
+      const values: Record<string, number> = {};
+      for (const spec of entry.parameters) values[spec.key] = spec.value;
+      const redrafted = entry.redraft(values);
       expect(redrafted.length).toBeGreaterThanOrEqual(2);
       for (const piece of redrafted) {
         expect(piece.grainline).toBeDefined();
