@@ -419,6 +419,119 @@ button:active:not(:disabled) {
   cursor: pointer;
 }
 
+/* --- Materials legend (UX-02) ---------------------------------------------
+   Overlay card on the cutting mat: every piece identifiable by name and
+   fabric without tapping. Floating over the viewport it describes, in the
+   same translucent-paper language as the assembly bar; entries are 44 px
+   touch targets, and focus mirrors hover so the linkage is keyboard-reachable. */
+
+.materials-legend {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  max-width: min(280px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-m);
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow-pop);
+  /* Enters with the mat it annotates (same settle language as the bar). */
+  animation: bar-rise 320ms var(--ease) both;
+}
+
+.materials-legend[hidden] {
+  display: none;
+}
+
+.materials-legend h2 {
+  margin: 0 0 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.legend-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.legend-entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Transient attention, from either side: the pointer on the entry, or a
+   scene hover arriving through the shell's hover channel. */
+.legend-entry:hover:not(.selected),
+.legend-entry.hover:not(.selected) {
+  background: var(--surface-hover);
+  border-color: var(--primary);
+}
+
+.legend-entry:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* Committed choice: solid cobalt, matching the piece panel. */
+.legend-entry.selected {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--on-primary);
+  box-shadow: 0 0 0 1px var(--primary) inset;
+}
+
+.legend-swatch {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+}
+
+.legend-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.legend-name {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.legend-fabric {
+  color: var(--ink-dim);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.legend-entry.selected .legend-fabric {
+  color: color-mix(in srgb, var(--on-primary) 80%, var(--primary));
+}
+
+
 /* --- Status bar ---------------------------------------------------------- */
 
 .status-bar {
@@ -739,6 +852,7 @@ button:active:not(:disabled) {
 @media (prefers-reduced-motion: reduce) {
   .viewport-canvas,
   .piece-list,
+  .materials-legend,
   .assembly-bar {
     animation: none;
   }
