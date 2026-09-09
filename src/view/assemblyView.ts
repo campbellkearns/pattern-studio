@@ -52,6 +52,12 @@ import {
   prefersReducedMotion,
   seamIsCurved,
 } from './walkthroughMotion';
+import {
+  shadowFrustumHalfExtentForRectsCm,
+  surfacesWorldRectCm,
+  sweptGroundRectCm,
+  type WorldRectCm,
+} from './cameraFit';
 import { createSurfaceMeshes } from './surfaceMeshes';
 import { ROOM_FOG_FAR_CM, ROOM_FOG_NEAR_CM } from './matSurface';
 import {
@@ -121,10 +127,6 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
   sun.position.set(90, 170, 110);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = -130;
-  sun.shadow.camera.right = 130;
-  sun.shadow.camera.top = 130;
-  sun.shadow.camera.bottom = -130;
   sun.shadow.camera.near = 20;
   sun.shadow.camera.far = 500;
   scene.add(sun);
@@ -214,6 +216,43 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
       marks.material as LineBasicMaterial,
     );
   }
+
+  // --- Shadow frustum: sized to every pose the walkthrough can reach ------
+  // The old fixed ±130 box clipped shadows for oversized layouts; here the
+  // sun's box covers the mat + apron surfaces plus the ground projection of
+  // every piece swept through each scrub step (endpoints and mid-fold
+  // samples), so no reachable pose can clip.
+  const applyAssemblyShadowFrustum = (): void => {
+    const rects: WorldRectCm[] = [surfacesWorldRectCm(null)];
+    for (const view of pieceViews) {
+      const mesh = view.poseGroup.children[0] as Mesh;
+      mesh.geometry.computeBoundingBox();
+      const box = mesh.geometry.boundingBox;
+      if (!box) throw new Error(`piece ${view.id} geometry has no bounds`);
+      // A step-free plan keeps every piece at its base pose — sample (0,0).
+      const samples: Array<[number, number]> =
+        plan.steps.length === 0 ? [[0, 0]] : [];
+      for (let stepIndex = 0; stepIndex < plan.steps.length; stepIndex++) {
+        for (const t of [0, 0.25, 0.5, 0.75, 1]) samples.push([stepIndex, t]);
+      }
+      const matrices: number[][] = [];
+      for (const [stepIndex, t] of samples) {
+        const pose = evaluateAssemblyPose(plan, stepIndex, t).get(view.id);
+        if (!pose) {
+          throw new Error(`assembly plan has no pose for piece "${view.id}"`);
+        }
+        matrices.push(pose.elements);
+      }
+      rects.push(sweptGroundRectCm(box, matrices));
+    }
+    const halfExtentCm = shadowFrustumHalfExtentForRectsCm(rects);
+    sun.shadow.camera.left = -halfExtentCm;
+    sun.shadow.camera.right = halfExtentCm;
+    sun.shadow.camera.top = halfExtentCm;
+    sun.shadow.camera.bottom = -halfExtentCm;
+    sun.shadow.camera.updateProjectionMatrix();
+  };
+  applyAssemblyShadowFrustum();
 
   // --- Current-seam highlight ---------------------------------------------
   // The current seam: a seam check — the token's green, verbatim.

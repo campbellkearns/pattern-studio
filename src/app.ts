@@ -33,6 +33,8 @@ import {
   readShareToken,
 } from './io/shareLink';
 import { createFabricPanel } from './view/fabricPanel';
+import { createRefitButton } from './view/refitButton';
+import type { RefitButtonHandle } from './view/refitButton';
 import {
   isTextEntryTarget,
   shortcutAction,
@@ -252,6 +254,7 @@ export function mountApp(root: HTMLElement): void {
   let measurementsHandle: MeasurementsPanelHandle | null = null;
   let unsubscribe: (() => void) | null = null;
   let assembleButton: HTMLButtonElement | null = null;
+  let refitButtonHandle: RefitButtonHandle | null = null;
 
   /** Swap the live project: tear the old views down, mount fresh ones. */
   const mountProject = (project: Project): void => {
@@ -365,9 +368,13 @@ export function mountApp(root: HTMLElement): void {
       },
     );
     // Re-derive the selection status from the freshly mounted project so
-    // the bar never carries pre-mount text.
+    // the bar never carries pre-mount text. Selection subscription itself
+    // is module-level (UX-05) — remounts must not stack listeners.
     const text = statusText(state);
     if (text !== null) narrate(text);
+    // The mat viewport is live again — refit has work to frame (main #16,
+    // integrated with the UX-03 remount path).
+    refitButtonHandle?.setEnabled(true);
   };
 
   // --- Assembly mode (fold-around-seam walkthrough) ------------------------
@@ -460,6 +467,9 @@ export function mountApp(root: HTMLElement): void {
     dispatch(enterAssembly(state));
     const steps = assemblyView?.plan.steps ?? [];
     narrate(assemblyEntryMessage(steps.length, steps[0]?.step.name));
+    // Assembly swaps the mat viewport out — refit has nothing to frame
+    // (main #16, integrated with the UX-05 state-driven entry).
+    refitButtonHandle?.setEnabled(false);
   }
 
   /** Leave assembly mode and rebuild the cutting mat. */
@@ -567,6 +577,13 @@ export function mountApp(root: HTMLElement): void {
 
   // Mode entry: the Assemble button hands the stage to the fold walkthrough.
   assembleButton = addButton('Assemble', tryEnterAssembly);
+
+  // Camera refit: the tap equivalent of the F shortcut. Built once; the
+  // mode transitions below decide when it has a viewport to act on.
+  refitButtonHandle = createRefitButton(actions, () => viewport?.refit());
+  // Startup mount (line ~376) runs before the toolbar exists — reflect the
+  // live viewport state here rather than waiting for the next mount.
+  refitButtonHandle.setEnabled(viewport !== null);
 
   addButton('Save', () => {
     try {
@@ -692,6 +709,9 @@ export function mountApp(root: HTMLElement): void {
         break;
       case 'preset-3d':
         viewport?.applyPreset('three-d');
+        break;
+      case 'refit-camera':
+        viewport?.refit();
         break;
       case 'assemble':
         tryEnterAssembly();
