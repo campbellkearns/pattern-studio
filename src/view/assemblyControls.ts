@@ -7,7 +7,23 @@
  * Previous/Next buttons move v between seam boundaries one seam at a time.
  * When v reaches stepCount the fold sequence is complete and the learn
  * card appears (the blueprint's "assembly completes" state).
+ *
+ * UX-01 motion rework: button steps TWEEN v to the target boundary (durations
+ * from the motion spec, per seam type and direction) instead of jumping, so
+ * the fold plays continuously and Previous retraces it in reverse. The tween
+ * is interruptible — a click mid-tween retargets from the current value, and
+ * a manual scrub cancels it outright. Under prefers-reduced-motion the tween
+ * collapses to zero duration: steps land instantly on the legible boundary
+ * frame. The fold itself renders through the pure pose function; this module
+ * only moves the timeline value.
  */
+import type { FrameScheduler } from './walkthroughMotion';
+import {
+  easedProgress01,
+  foldDurationMs,
+  prefersReducedMotion,
+  rafFrameScheduler,
+} from './walkthroughMotion';
 
 export interface AssemblyStepLabel {
   /** e.g. "Flap → Outer cover". */
@@ -31,6 +47,21 @@ export interface AssemblyControlsOptions {
   onScrub(state: AssemblyScrubState): void;
   /** Called by the "Back to cutting mat" button. */
   onExit(): void;
+  /**
+   * UX-01: fold duration for a button step, in milliseconds — the caller
+   * maps stepIndex to the motion spec (curved seams get more time). Defaults
+   * to the straight-seam row; reduced motion overrides any duration to 0.
+   */
+  readonly stepDurationMs?: (stepIndex: number, forward: boolean) => number;
+  /**
+   * UX-01: fired once when a button step begins, with the seam about to
+   * fold and the direction — the camera's pre-frame cue.
+   */
+  readonly onStepBegin?: (stepIndex: number, forward: boolean) => void;
+  /** Clock + frame source; tests inject a manual pump. */
+  readonly scheduler?: FrameScheduler;
+  /** Reduced-motion gate; tests inject a stub. Defaults to the media query. */
+  readonly reducedMotion?: () => boolean;
 }
 
 export interface AssemblyControlsHandle {
@@ -124,6 +155,60 @@ export function createAssemblyControls(
   let value = 0;
   let disposed = false;
 
+  // --- Value tween (UX-01): button steps glide v to the target boundary ----
+  const scheduler: FrameScheduler = options.scheduler ?? rafFrameScheduler;
+  const reducedMotion = options.reducedMotion ?? prefersReducedMotion;
+  let tween: {
+    from: number;
+    to: number;
+    startMs: number;
+    durationMs: number;
+  } | null = null;
+
+  const stopTween = (): void => {
+    tween = null;
+  };
+
+  const tick = (): void => {
+    if (!tween || disposed) return;
+    const progress = easedProgress01(
+      scheduler.nowMs() - tween.startMs,
+      tween.durationMs,
+    );
+    value = tween.from + (tween.to - tween.from) * progress;
+    render();
+    if (progress >= 1) {
+      tween = null;
+      return;
+    }
+    scheduler.nextFrame(tick);
+  };
+
+  /** Glide v to an adjacent boundary; duration 0 (reduced motion) lands now. */
+  const stepValue = (to: number): void => {
+    const target = clamp(to, 0, stepCount);
+    if (disposed || stepCount === 0 || target === value) return;
+    const forward = target > value;
+    // The seam this step folds (or un-folds): the lower of the two boundaries.
+    const stepIndex = Math.min(
+      Math.floor(Math.min(value, target)),
+      stepCount - 1,
+    );
+    options.onStepBegin?.(stepIndex, forward);
+    const durationMs = reducedMotion()
+      ? 0
+      : (options.stepDurationMs ?? ((_index: number, isForward: boolean) =>
+          foldDurationMs(isForward, false)))(stepIndex, forward);
+    if (durationMs <= 0) {
+      stopTween();
+      value = target;
+      render();
+      return;
+    }
+    tween = { from: value, to: target, startMs: scheduler.nowMs(), durationMs };
+    scheduler.nextFrame(tick);
+  };
+
   const render = (): void => {
     const state = scrubStateFromValue(value, stepCount);
     slider.value = String(value);
@@ -146,22 +231,24 @@ export function createAssemblyControls(
 
   slider.addEventListener('input', () => {
     if (disposed) return;
+    // Manual scrub outranks the animation: a drag cancels the tween.
+    stopTween();
     value = Number(slider.value);
     render();
   });
 
   prevButton.addEventListener('click', () => {
+    // Back one seam boundary: 2.0 → 1.0, 1.5 → 1.0 (finish un-folding) —
+    // tweened, so the un-fold plays in reverse continuously (UX-01).
     if (disposed) return;
-    // Back one seam boundary: 2.0 → 1.0, 1.5 → 1.0 (finish un-folding).
-    value = clamp(Math.ceil(value - 1), 0, stepCount);
-    render();
+    stepValue(Math.ceil(value - 1));
   });
 
   nextButton.addEventListener('click', () => {
+    // Forward one seam boundary: 1.5 → 2.0 (finish the fold), 2.0 → 3.0 —
+    // tweened through the fold instead of snapping to it (UX-01).
     if (disposed) return;
-    // Forward one seam boundary: 1.5 → 2.0 (finish the fold), 2.0 → 3.0.
-    value = clamp(Math.floor(value) + 1, 0, stepCount);
-    render();
+    stepValue(Math.floor(value) + 1);
   });
 
   exitButton.addEventListener('click', () => {
@@ -173,6 +260,8 @@ export function createAssemblyControls(
   return {
     setValue(next) {
       if (disposed) return;
+      // Programmatic jumps are instant and cancel any in-flight tween.
+      stopTween();
       value = clamp(next, 0, stepCount);
       render();
     },

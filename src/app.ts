@@ -42,6 +42,7 @@ import { statusClassName } from './view/statusTone';
 import type { StatusTone } from './view/statusTone';
 import { createAssemblyControls } from './view/assemblyControls';
 import type { AssemblyControlsHandle } from './view/assemblyControls';
+import { foldDurationMs, seamIsCurved } from './view/walkthroughMotion';
 import { createAssemblyView } from './view/assemblyView';
 import type { AssemblyView } from './view/assemblyView';
 import { createMeasurementsPanel } from './view/measurementsPanel';
@@ -407,6 +408,15 @@ export function mountApp(root: HTMLElement): void {
       learnCard: starterLearnCard(state.project),
       onScrub: (scrub) => assemblyView?.setScrub(scrub.stepIndex, scrub.t),
       onExit: exitAssemblyToMat,
+      // UX-01 motion spec: fold duration per seam — curved seams get more
+      // time. Reduced-motion gating lives in the controls; the camera's
+      // pre-frame rides onStepBegin (the seam about to fold).
+      stepDurationMs: (stepIndex, forward) => {
+        const chain = assemblyView?.plan.steps[stepIndex]?.anchorChainWorld;
+        return foldDurationMs(forward, chain ? seamIsCurved(chain) : false);
+      },
+      onStepBegin: (stepIndex, forward) =>
+        assemblyView?.preFrameSeam(stepIndex, forward),
     });
   }
 
