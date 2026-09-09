@@ -68,6 +68,12 @@ export interface Viewport {
   updatePieces(pieces: readonly Piece[]): void;
   /** Dev/dogfood aid: each piece's centre in client coordinates. */
   pieceScreenPositions(): Array<{ id: string; x: number; y: number }>;
+  /**
+   * Highlight a piece exactly as a canvas hover would (legend ↔ viewport
+   * linkage); null clears. Drives the same visuals and onHoverChange
+   * callback as a pointer hover.
+   */
+  setHover(pieceId: string | null): void;
   dispose(): void;
 }
 
@@ -131,10 +137,7 @@ export function createViewport(options: ViewportOptions): Viewport {
   let currentFabric: FabricSpec = project.fabric;
   const fabricTextures = createFabricTextures(currentFabric);
 
-  const sharedDisposables: { dispose(): void }[] = [
-    surfaces,
-    fabricTextures,
-  ];
+  const sharedDisposables: { dispose(): void }[] = [surfaces, fabricTextures];
   let pieceDisposables: { dispose(): void }[] = [];
   let views: PieceView[] = [];
   let meshes: Mesh[] = [];
@@ -458,5 +461,12 @@ export function createViewport(options: ViewportOptions): Viewport {
     });
   };
 
-  return { applyPreset, applyFabric, updatePieces, pieceScreenPositions, dispose };
+  return {
+    applyPreset,
+    applyFabric,
+    updatePieces,
+    setHover,
+    pieceScreenPositions,
+    dispose,
+  };
 }

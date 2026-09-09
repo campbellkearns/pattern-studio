@@ -48,6 +48,8 @@ import { createMeasurementsPanel } from './view/measurementsPanel';
 import type { MeasurementsPanelHandle } from './view/measurementsPanel';
 import { createPiecePanel } from './view/panel';
 import type { PanelHandle } from './view/panel';
+import { createMaterialsLegend } from './view/legend';
+import type { MaterialsLegendHandle } from './view/legend';
 import { supportsWebGL2 } from './view/webgl';
 import { createSelectionStore } from './view/selection';
 import type { SelectionStore } from './view/selection';
@@ -237,6 +239,7 @@ export function mountApp(root: HTMLElement): void {
   let assemblyView: AssemblyView | null = null;
   let assemblyControls: AssemblyControlsHandle | null = null;
   let panelHandle: PanelHandle | null = null;
+  let legendHandle: MaterialsLegendHandle | null = null;
   let fabricHandle: { dispose(): void } | null = null;
   let measurementsHandle: MeasurementsPanelHandle | null = null;
   let unsubscribe: (() => void) | null = null;
@@ -248,6 +251,8 @@ export function mountApp(root: HTMLElement): void {
     // scene cannot survive the remount.
     disposeAssemblyScene();
     panelHandle?.dispose();
+    legendHandle?.dispose();
+    legendHandle = null;
     fabricHandle?.dispose();
     measurementsHandle?.dispose();
     viewport?.dispose();
@@ -272,6 +277,10 @@ export function mountApp(root: HTMLElement): void {
         container: canvasHolder,
         project,
         selection: matSelection,
+        // Scene-side hover lands on the legend (entry highlight); the
+        // legend's own hover lands back on the scene through onEntryHover
+        // below — one transient-attention channel, two directions.
+        onHoverChange: (id) => legendHandle?.setHover(id),
       });
     } catch (error) {
       // Never swallow: the user gets the unsupported screen with the cause.
@@ -279,9 +288,26 @@ export function mountApp(root: HTMLElement): void {
       renderUnsupported(root);
       return;
     }
-    panelHandle = createPiecePanel(piecesSection, project.pieces, matSelection, {
-      onPreset: (preset) => viewport?.applyPreset(preset),
-    });
+    // Materials legend (UX-02): every piece on the mat, named and
+    // fabric-identified, overlaid on the viewport it describes. Entries
+    // select through the same matSelection proxy as every other surface
+    // (the state model stays the only writer), and 44 px entries keep the
+    // legend usable at the cutting table.
+    legendHandle = createMaterialsLegend(
+      canvasHolder,
+      project.pieces,
+      project.fabric,
+      matSelection,
+      { onEntryHover: (id) => viewport?.setHover(id) },
+    );
+    panelHandle = createPiecePanel(
+      piecesSection,
+      project.pieces,
+      matSelection,
+      {
+        onPreset: (preset) => viewport?.applyPreset(preset),
+      },
+    );
     // Fabric panel: weave / scale / colour / stripe pickers that re-skin
     // every piece live. Re-created per mount so a loaded or imported
     // project's fabric seeds the controls; changes route through the model
@@ -354,6 +380,10 @@ export function mountApp(root: HTMLElement): void {
    * claims a mode the scene does not show.
    */
   function buildAssemblyScene(): void {
+    // The legend is a mat-mode surface and its card lives in the canvas
+    // holder this function clears — let it go with the mat it describes.
+    legendHandle?.dispose();
+    legendHandle = null;
     viewport?.dispose();
     viewport = null;
     canvasHolder.innerHTML = '';
@@ -446,6 +476,7 @@ export function mountApp(root: HTMLElement): void {
       onPiecesRedrafted: (pieces) => {
         viewport?.updatePieces(pieces);
         panelHandle?.updatePieces(pieces);
+        legendHandle?.updatePieces(pieces);
         if (state.mode === 'assembly') {
           // The walkthrough's seams are planned from piece geometry; stale
           // geometry would fold the wrong pattern. Re-plan from the redraft.
@@ -475,6 +506,8 @@ export function mountApp(root: HTMLElement): void {
         // assembly view, the mat through the viewport.
         if (assemblyView) assemblyView.applyFabric(spec);
         else viewport?.applyFabric(spec);
+        // The legend's swatches and summaries ride the same live swap.
+        legendHandle?.updateFabric(spec);
       },
     });
   };
@@ -647,6 +680,7 @@ export function mountApp(root: HTMLElement): void {
     fabricHandle?.dispose();
     measurementsHandle?.dispose();
     panelHandle?.dispose();
+    legendHandle?.dispose();
     disposeAssemblyScene();
     viewport?.dispose();
     viewport = null;
