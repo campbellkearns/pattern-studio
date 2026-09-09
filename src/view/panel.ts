@@ -6,7 +6,8 @@
  * baseline; true-scale dimensions come from the same geometry the viewport
  * renders.
  */
-import type { Piece } from '../model';
+import type { Piece, SeamStep } from '../model';
+import { createGlossaryPopover, renderAnnotatedText } from './glossaryDom';
 import { pieceExtents } from './pieceGeometry';
 import type { SelectionStore } from './selection';
 
@@ -30,10 +31,14 @@ function formatSize(piece: Piece): string {
 export function createPiecePanel(
   container: HTMLElement,
   initialPieces: readonly Piece[],
+  assembly: readonly SeamStep[],
   selection: SelectionStore,
   callbacks: PanelCallbacks,
 ): PanelHandle {
   let pieces = initialPieces;
+
+  // UX-07 glossary: one popover serves the piece meta and the seams line.
+  const popover = createGlossaryPopover();
 
   const header = document.createElement('div');
   header.className = 'panel-header';
@@ -68,6 +73,30 @@ export function createPiecePanel(
   empty.textContent =
     'No pieces on the mat — pick a starter or import a project.';
 
+  // UX-07: the panel names the seams the walkthrough will fold, so the
+  // build order is legible before Assemble. Rebuilt with the list so the
+  // fallback names track redrafted pieces.
+  const seams = document.createElement('p');
+  seams.className = 'panel-seams';
+
+  const seamDisplayName = (step: SeamStep): string => {
+    if (step.name) return step.name;
+    const nameOf = (id: string): string =>
+      pieces.find((piece) => piece.id === id)?.name ?? id;
+    return `${nameOf(step.pieces[0])} → ${nameOf(step.pieces[1])}`;
+  };
+
+  const buildSeamsLine = (): void => {
+    seams.replaceChildren();
+    if (assembly.length === 0) return;
+    const names = assembly.map(seamDisplayName).join(', ');
+    renderAnnotatedText(
+      seams,
+      `Assembly — ${assembly.length} seam${assembly.length === 1 ? '' : 's'}: ${names}.`,
+      { popover },
+    );
+  };
+
   let entries: { button: HTMLButtonElement; onClick: () => void }[] = [];
 
   const buildList = (): void => {
@@ -85,7 +114,11 @@ export function createPiecePanel(
       name.textContent = piece.name;
       const meta = document.createElement('span');
       meta.className = 'piece-meta';
-      meta.textContent = `cut ${piece.cutCount} · ${formatSize(piece)}`;
+      // The cut count is pattern shorthand — chip the term inline (UX-07).
+      renderAnnotatedText(meta, `cut ${piece.cutCount}`, { popover });
+      meta.appendChild(
+        document.createTextNode(` · ${formatSize(piece)}`),
+      );
 
       button.append(name, meta);
       item.appendChild(button);
@@ -99,10 +132,12 @@ export function createPiecePanel(
     }
     list.hidden = pieces.length === 0;
     empty.hidden = pieces.length > 0;
+    seams.hidden = assembly.length === 0;
+    buildSeamsLine();
   };
   buildList();
 
-  container.append(header, list, empty);
+  container.append(header, list, empty, seams);
 
   const render = (selectedId: string | null): void => {
     for (const { button } of entries) {
@@ -122,6 +157,7 @@ export function createPiecePanel(
     },
     dispose(): void {
       unsubscribe();
+      popover.dispose();
       for (const { button, onClick } of entries) {
         button.removeEventListener('click', onClick);
       }

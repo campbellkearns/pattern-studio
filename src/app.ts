@@ -42,6 +42,7 @@ import { statusClassName } from './view/statusTone';
 import type { StatusTone } from './view/statusTone';
 import { createAssemblyControls } from './view/assemblyControls';
 import type { AssemblyControlsHandle } from './view/assemblyControls';
+import { createGlossaryPopover, renderAnnotatedText } from './view/glossaryDom';
 import { foldDurationMs, seamIsCurved } from './view/walkthroughMotion';
 import { createAssemblyView } from './view/assemblyView';
 import type { AssemblyView } from './view/assemblyView';
@@ -57,6 +58,7 @@ import type { SelectionStore } from './view/selection';
 import {
   applyAppState,
   applyFabric,
+  assemblyEntryMessage,
   enterAssembly,
   exitAssembly,
   initialAppState,
@@ -226,6 +228,11 @@ export function mountApp(root: HTMLElement): void {
   status.setAttribute('role', 'status');
   status.textContent = NOTHING_SELECTED_MESSAGE;
 
+  // UX-07: the status bar narrates every outcome — teach through it. Copy is
+  // rendered through the glossary so sewing terms chip inline on first use;
+  // the popover is disposed with the page (main.ts owns the lifecycle).
+  const statusPopover = createGlossaryPopover();
+
   shell.append(toolbar, layout);
   root.append(shell, status);
 
@@ -304,6 +311,7 @@ export function mountApp(root: HTMLElement): void {
     panelHandle = createPiecePanel(
       piecesSection,
       project.pieces,
+      project.assembly,
       matSelection,
       {
         onPreset: (preset) => viewport?.applyPreset(preset),
@@ -399,8 +407,12 @@ export function mountApp(root: HTMLElement): void {
     });
     const nameOf = (id: string): string =>
       state.project.pieces.find((p) => p.id === id)?.name ?? id;
+    // UX-07: named seams lead the counter — "Rise seam: Front → Back" — so
+    // the walkthrough teaches the seam's name where the user is looking.
     const labels = assemblyView.plan.steps.map(({ step }) => ({
-      title: `${nameOf(step.pieces[0])} → ${nameOf(step.pieces[1])}`,
+      title: step.name
+        ? `${step.name}: ${nameOf(step.pieces[0])} → ${nameOf(step.pieces[1])}`
+        : `${nameOf(step.pieces[0])} → ${nameOf(step.pieces[1])}`,
       note: step.note,
     }));
     assemblyControls = createAssemblyControls(canvasHolder, {
@@ -439,10 +451,8 @@ export function mountApp(root: HTMLElement): void {
     // Effects: the Assemble button derives from mode, and any mat selection
     // clears — selection is a mat concept, and the walkthrough shows none.
     dispatch(enterAssembly(state));
-    const count = assemblyView?.plan.steps.length ?? 0;
-    narrate(
-      `Assembly — ${count} seam${count === 1 ? '' : 's'} to fold. Scrub through them.`,
-    );
+    const steps = assemblyView?.plan.steps ?? [];
+    narrate(assemblyEntryMessage(steps.length, steps[0]?.step.name));
   }
 
   /** Leave assembly mode and rebuild the cutting mat. */
@@ -454,8 +464,12 @@ export function mountApp(root: HTMLElement): void {
 
   // Narration and selection share the status bar: the latest event wins.
   // The tone dresses the pill (error/success) so outcomes read at a glance.
+  // Copy renders through the glossary annotator: terms chip on first use
+  // (UX-07), so narration teaches instead of assuming vocabulary.
   const narrate = (message: string, tone: StatusTone = 'info'): void => {
-    status.textContent = message;
+    statusPopover.close();
+    status.replaceChildren();
+    renderAnnotatedText(status, message, { popover: statusPopover });
     status.classList.remove('error', 'success');
     const className = statusClassName(tone);
     if (className) status.classList.add(className);
@@ -694,5 +708,6 @@ export function mountApp(root: HTMLElement): void {
     disposeAssemblyScene();
     viewport?.dispose();
     viewport = null;
+    statusPopover.dispose();
   });
 }

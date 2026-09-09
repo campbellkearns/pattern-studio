@@ -365,6 +365,20 @@ button:active:not(:disabled) {
   display: none;
 }
 
+/* UX-07: the panel names the seams the walkthrough will fold, so the build
+ * order is legible before Assemble. Sits right under the piece list. */
+.panel-seams {
+  margin: 0;
+  padding: 0 14px 12px;
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.panel-seams[hidden] {
+  display: none;
+}
+
 /* --- Fabric panel ---------------------------------------------------------- */
 
 .fabric-group {
