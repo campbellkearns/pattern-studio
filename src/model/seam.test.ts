@@ -77,4 +77,14 @@ describe('createSeamStep', () => {
       /integer >= 1/,
     );
   });
+
+  it('keeps an empty name undefined, and validates a present one (UX-07)', () => {
+    const unnamed = createSeamStep(sideSeam());
+    expect(unnamed.name).toBeUndefined();
+    const named = createSeamStep(sideSeam({ name: 'Rise seam' }));
+    expect(named.name).toBe('Rise seam');
+    expect(() => createSeamStep(sideSeam({ name: '   ' }))).toThrow(
+      /non-empty/,
+    );
+  });
 });
