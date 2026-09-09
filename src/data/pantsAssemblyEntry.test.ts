@@ -63,7 +63,11 @@ describe('pants assembly entry across the parameter range', () => {
     }
   });
 
-  it('measures every seam chain within its gate across the range and corners', () => {
+  it(
+    'measures every seam chain within its gate across the range and corners',
+    // 272 redrafts at full geometry; CI's 1-vCPU container needs ~8s.
+    { timeout: 30_000 },
+    () => {
     // The same gate the assembly engine applies, checked over every corner
     // of the measurement panel's range (including the topology-shifting
     // extremes that render an eighth outline vertex). Chains are resolved
@@ -117,9 +121,14 @@ describe('pants assembly entry across the parameter range', () => {
       expect(measurements.waistCm).toBe(60);
       expect(measurements.hipCm).toBe(160);
     }
-  });
+    },
+  );
 
-  it('plans the full six-step assembly end to end wherever the draft is sewable', () => {
+  it(
+    'plans the full six-step assembly end to end wherever the draft is sewable',
+    // 260 full plans on top of 272 redrafts; CI's small container needs ~7s.
+    { timeout: 30_000 },
+    () => {
     // Entry is eager: buildAssemblyScene plans every step before the mode
     // switch. The choreography (further seams of the joined pair sew in
     // place; the waistband is its own mover) must therefore survive the
@@ -173,7 +182,8 @@ describe('pants assembly entry across the parameter range', () => {
       false,
       true,
     ]);
-  });
+    },
+  );
 });
 
 /** Re-measure every seam step of one draft; false when any breaches its gate. */
