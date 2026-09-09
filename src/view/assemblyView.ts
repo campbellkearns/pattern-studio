@@ -32,6 +32,7 @@ import {
   WebGLRenderer,
 } from 'three';
 import type { FabricSpec, Project } from '../model';
+import { SCENE } from '../tokens';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import {
   evaluateAssemblyPose,
@@ -89,14 +90,14 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
   renderer.shadowMap.type = PCFSoftShadowMap;
 
   const scene = new Scene();
-  scene.background = new Color('#23282e');
+  scene.background = new Color(SCENE.background);
 
   const camera = new PerspectiveCamera(40, 1, 0.5, 4000);
 
   // --- Lights (same rig as the viewport) ---------------------------------
-  const hemi = new HemisphereLight('#e8eef4', '#3a4038', 1.0);
+  const hemi = new HemisphereLight(SCENE.hemiSky, SCENE.hemiGround, 1.0);
   scene.add(hemi);
-  const sun = new DirectionalLight('#fff8ec', 2.2);
+  const sun = new DirectionalLight(SCENE.sun, 2.2);
   sun.position.set(90, 170, 110);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -161,11 +162,11 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
     const edgeGeometry = new EdgesGeometry(outlineGeometry, 10);
     const outline = new LineSegments(
       edgeGeometry,
-      new LineBasicMaterial({ color: '#1c242b' }),
+      new LineBasicMaterial({ color: SCENE.outline }),
     );
     const marks = new LineSegments(
       marksGeometry(piece.internal),
-      new LineBasicMaterial({ color: '#24303a' }),
+      new LineBasicMaterial({ color: SCENE.marks }),
     );
     marks.position.y = 0.04;
 
@@ -186,7 +187,8 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
   }
 
   // --- Current-seam highlight ---------------------------------------------
-  const seamMaterial = new LineBasicMaterial({ color: '#ffd166' });
+  // The current seam: a seam check — the token's green, verbatim.
+  const seamMaterial = new LineBasicMaterial({ color: SCENE.seam });
   const seamLine = new Line(new BufferGeometry(), seamMaterial);
   seamLine.visible = false;
   seamLine.position.y = SEAM_LIFT_CM;

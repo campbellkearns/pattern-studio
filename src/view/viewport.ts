@@ -28,6 +28,7 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three';
+import { SCENE } from '../tokens';
 import type { FabricSpec, Piece, Project } from '../model';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { createFabricTextures, roughnessFor } from './fabricTexture';
@@ -77,9 +78,6 @@ const MARKS_LIFT_CM = 0.04;
 /** Max pointer travel (px) between down and up that still counts as a tap. */
 const TAP_SLOP_PX = 8;
 
-const HOVER_EMISSIVE = 0x2a3b44;
-const SELECT_EMISSIVE = 0x5a4410;
-
 interface PieceView {
   id: string;
   group: Group;
@@ -97,14 +95,14 @@ export function createViewport(options: ViewportOptions): Viewport {
   renderer.shadowMap.type = PCFSoftShadowMap;
 
   const scene = new Scene();
-  scene.background = new Color('#23282e');
+  scene.background = new Color(SCENE.background);
 
   const camera = new PerspectiveCamera(40, 1, 0.5, 4000);
 
   // --- Lights -----------------------------------------------------------
-  const hemi = new HemisphereLight('#e8eef4', '#3a4038', 1.0);
+  const hemi = new HemisphereLight(SCENE.hemiSky, SCENE.hemiGround, 1.0);
   scene.add(hemi);
-  const sun = new DirectionalLight('#fff8ec', 2.2);
+  const sun = new DirectionalLight(SCENE.sun, 2.2);
   sun.position.set(90, 170, 110);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -215,17 +213,18 @@ export function createViewport(options: ViewportOptions): Viewport {
       const edgeGeometry = new EdgesGeometry(outlineGeometry, 10);
       const baseOutline = new LineSegments(
         edgeGeometry,
-        new LineBasicMaterial({ color: '#1c242b' }),
+        new LineBasicMaterial({ color: SCENE.outline }),
       );
       const highlight = new LineSegments(
         edgeGeometry,
-        new LineBasicMaterial({ color: '#ffd166' }),
+        // Hover/select recolor this line in refreshVisuals below.
+        new LineBasicMaterial({ color: SCENE.hoverHighlight }),
       );
       highlight.visible = false;
 
       const marks = new LineSegments(
         marksGeometry(piece.internal),
-        new LineBasicMaterial({ color: '#24303a' }),
+        new LineBasicMaterial({ color: SCENE.marks }),
       );
       marks.position.y = MARKS_LIFT_CM;
 
@@ -320,8 +319,17 @@ export function createViewport(options: ViewportOptions): Viewport {
     for (const view of views) {
       const hovered = hoverId === view.id;
       const selected = selectedId === view.id;
-      view.material.emissive.setHex(
-        selected ? SELECT_EMISSIVE : hovered ? HOVER_EMISSIVE : 0x000000,
+      view.material.emissive.set(
+        selected
+          ? SCENE.selectEmissive
+          : hovered
+            ? SCENE.hoverEmissive
+            : '#000000',
+      );
+      // Amber marks transient attention (hover); cobalt marks the
+      // committed choice, matching the panel's selected treatment.
+      (view.highlight.material as LineBasicMaterial).color.set(
+        selected ? SCENE.selectHighlight : SCENE.hoverHighlight,
       );
       view.highlight.visible = selected || hovered;
     }

@@ -15,6 +15,7 @@ import {
   MAT_TILE_CM,
   MAT_WIDTH_CM,
 } from './matSurface';
+import { CUTTING_MAT_GREEN, GRID_AZURE, PAPER } from '../tokens';
 
 /** Canvas pixels per world centimetre. */
 const PX_PER_CM = 24;
@@ -27,10 +28,19 @@ export interface MatGridSpec {
 }
 
 const GRID: MatGridSpec = {
-  base: '#43524a',
+  base: CUTTING_MAT_GREEN,
   minorEveryCm: 1,
   mediumEveryCm: 5,
   majorEveryCm: MAT_TILE_CM,
+};
+
+/** Token hex → rgba string, so every mat color derives from one token. */
+const withAlpha = (hex: string, alpha: number): string => {
+  const n = hex.replace('#', '');
+  const r = parseInt(n.slice(0, 2), 16);
+  const g = parseInt(n.slice(2, 4), 16);
+  const b = parseInt(n.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 };
 
 /** Grid line positions in absolute mat centimetres, 0..lengthCm, tiered by
@@ -264,12 +274,12 @@ export function canvasYForCm(yCm: number, depthCm: number = MAT_DEPTH_CM): numbe
 // --- Renderer --------------------------------------------------------------
 
 const STYLES = {
-  minor: 'rgba(255, 255, 255, 0.10)',
-  medium: 'rgba(255, 255, 255, 0.20)',
-  major: 'rgba(255, 255, 255, 0.38)',
-  print: 'rgba(255, 255, 255, 0.62)',
-  printStrong: 'rgba(255, 255, 255, 0.85)',
-  guide: 'rgba(255, 255, 255, 0.35)',
+  minor: withAlpha(GRID_AZURE, 0.45),
+  medium: withAlpha(GRID_AZURE, 0.7),
+  major: GRID_AZURE, // 3.59:1 on the green base — clears WCAG 1.4.11
+  print: withAlpha(PAPER, 0.62),
+  printStrong: withAlpha(PAPER, 0.85),
+  guide: withAlpha(GRID_AZURE, 0.35),
 } as const;
 
 /** The app's UI stack; canvas print should match the atelier typography. */
