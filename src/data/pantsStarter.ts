@@ -308,6 +308,7 @@ export const PANTS_SEAM_STEPS: readonly SeamStep[] = [
     pieces: ['fly-shield', FRONT_ID],
     edges: [SHIELD_ATTACH_CHAIN, FRONT_CHAINS.flyExtension],
     order: 1,
+    name: 'Fly shield seam',
     note:
       'Baste the fly shield behind the front’s fly extension first — it backs ' +
       'the buttonhole placket and keeps the fly from gaping.',
@@ -316,6 +317,7 @@ export const PANTS_SEAM_STEPS: readonly SeamStep[] = [
     pieces: [FRONT_ID, BACK_ID],
     edges: [FRONT_CHAINS.rise, BACK_CHAINS.rise],
     order: 2,
+    name: 'Rise seam',
     note:
       'Stay-stitch both crotch curves before joining — this rise seam sets the ' +
       'fit, and a stretched curve here is the most common beginner fault. Ease ' +
@@ -325,6 +327,7 @@ export const PANTS_SEAM_STEPS: readonly SeamStep[] = [
     pieces: [FRONT_ID, BACK_ID],
     edges: [FRONT_CHAINS.outseam, BACK_CHAINS.outseam],
     order: 3,
+    name: 'Side seams',
     note:
       'Sew the side seams next and the legs become tubes. The pocket bags are ' +
       'caught in this seam — their notches mark where the mouth opens.',
@@ -333,6 +336,7 @@ export const PANTS_SEAM_STEPS: readonly SeamStep[] = [
     pieces: [FRONT_ID, BACK_ID],
     edges: [FRONT_CHAINS.inseam, BACK_CHAINS.inseam],
     order: 4,
+    name: 'Inseam',
     note:
       'The inseam curves around the inner leg; ease it to the back piece ' +
       'rather than stretching it flat.',
@@ -341,6 +345,7 @@ export const PANTS_SEAM_STEPS: readonly SeamStep[] = [
     pieces: [FRONT_ID, 'waistband'],
     edges: [FRONT_CHAINS.waist, WAISTBAND_CHAINS.front],
     order: 5,
+    name: 'Waistband front',
     note:
       'Right sides together along the front waist. The band’s grainline runs ' +
       'parallel to the waist so it stays firm and the notches meet.',
@@ -349,6 +354,7 @@ export const PANTS_SEAM_STEPS: readonly SeamStep[] = [
     pieces: [BACK_ID, 'waistband'],
     edges: [BACK_CHAINS.waist, WAISTBAND_CHAINS.back],
     order: 6,
+    name: 'Waistband back',
     note:
       'Join the back half the same way — centre the band’s centre-back notch ' +
       'at the centre back before stitching.',

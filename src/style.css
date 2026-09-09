@@ -365,6 +365,20 @@ button:active:not(:disabled) {
   display: none;
 }
 
+/* UX-07: the panel names the seams the walkthrough will fold, so the build
+ * order is legible before Assemble. Sits right under the piece list. */
+.panel-seams {
+  margin: 0;
+  padding: 0 14px 12px;
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.panel-seams[hidden] {
+  display: none;
+}
+
 /* --- Fabric panel ---------------------------------------------------------- */
 
 .fabric-group {
@@ -844,6 +858,87 @@ button:active:not(:disabled) {
   background: var(--primary-soft);
   color: var(--ink);
   font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+/* --- Glossary (UX-07): inline term chips + definition popover --------------- */
+
+/* The ⓘ chip is a button styled like inline text — it lives in the status
+ * bar, assembly notes, learn card, and piece meta, so it must read as copy
+ * first and an affordance second. Cobalt on the soft wash carries the
+ * “learnable” affordance; ink-free hover uses the same cobalt fill. */
+.term-chip {
+  display: inline-flex;
+  align-items: baseline;
+  padding: 0 7px;
+  margin: 0 1px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font: inherit;
+  font-size: 0.88em;
+  line-height: 1.4;
+  cursor: help;
+  vertical-align: baseline;
+}
+
+.term-chip:hover,
+.term-chip:focus-visible,
+.term-chip[aria-expanded='true'] {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+}
+
+/* Fixed-positioned against the viewport (anchored by glossaryDom.ts to the
+ * chip's screen rect), so one card serves every surface. */
+.glossary-popover {
+  position: fixed;
+  z-index: 60;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  max-width: min(340px, calc(100vw - 2 * var(--radius-m)));
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+}
+
+.glossary-popover[hidden] {
+  display: none;
+}
+
+.glossary-popover-term {
+  color: var(--primary);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.glossary-popover-close {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.glossary-popover-close:hover,
+.glossary-popover-close:focus-visible {
+  color: var(--ink);
+}
+
+.glossary-popover-definition {
+  grid-column: 1;
+  color: var(--ink);
+  font-size: 0.85rem;
   line-height: 1.45;
 }
 

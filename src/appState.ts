@@ -172,6 +172,20 @@ export const NOTHING_SELECTED_MESSAGE =
   'Nothing selected — tap a piece or pick one from the list.';
 
 /**
+ * Assembly-entry narration (UX-07): names the first seam so the build order
+ * starts teaching in place before the first fold. Pure and interpolated at
+ * the call site (app.ts) so the copy audit covers its real shape.
+ */
+export function assemblyEntryMessage(
+  stepCount: number,
+  firstSeamName?: string,
+): string {
+  const seams = `${stepCount} seam${stepCount === 1 ? '' : 's'}`;
+  const start = firstSeamName ? `, starting with the ${firstSeamName}` : '';
+  return `Assembly — ${seams} to fold${start}. Scrub through them.`;
+}
+
+/**
  * The mat-mode status line, derived from state. Assembly mode returns null:
  * its status bar is event-driven ("Seam 2 of 5", learn cards, load/save
  * outcomes), and a selection-style line there would contradict the scene.

@@ -167,6 +167,17 @@ describe('starter registry ladder', () => {
     }
   });
 
+  it('names every seam (UX-07): seams name themselves in place', () => {
+    for (const entry of STARTERS) {
+      const project = entry.build();
+      for (const step of project.assembly) {
+        expect(step.name).toEqual(
+          expect.stringMatching(/\S/),
+        );
+      }
+    }
+  });
+
   /** X-extent of an outline (for asserting parametric resizing). */
   function outlineMaxX(outline: readonly PathCmd[]): number {
     const xs: number[] = [];

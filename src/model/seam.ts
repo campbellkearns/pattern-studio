@@ -32,6 +32,12 @@ export interface SeamStep {
   readonly order: number;
   /** The "why" shown to the learner. */
   readonly note: string;
+  /**
+   * Learner-facing seam name (UX-07: seams name themselves in place), e.g.
+   * "Rise seam". Optional: projects predating the vocabulary layer simply
+   * omit it, and surfaces fall back to the joined piece names.
+   */
+  readonly name?: string;
 }
 
 export function createEdgeChain(input: EdgeChain): EdgeChain {
@@ -70,5 +76,9 @@ export function createSeamStep(input: SeamStep): SeamStep {
     edges: Object.freeze(edges),
     order: requirePositiveInteger(input.order, 'seam order'),
     note: input.note,
+    name:
+      input.name === undefined
+        ? undefined
+        : requireNonEmptyString(input.name, 'seam name'),
   });
 }

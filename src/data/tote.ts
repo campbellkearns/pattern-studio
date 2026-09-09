@@ -126,6 +126,7 @@ function toteAssembly(): SeamStep[] {
         { pieceId: 'body', startVertex: 0, edgeCount: 1 },
       ],
       order: 1,
+      name: 'Facing seam',
       note:
         'Sew the facing to the body along the top edge, then fold it down ' +
         'to the inside — it binds the raw edge at the opening.',
@@ -138,6 +139,7 @@ function toteAssembly(): SeamStep[] {
         { pieceId: 'body', startVertex: 2, edgeCount: 1 },
       ],
       order: 2,
+      name: 'Base band seam',
       note:
         'Sew the base band to the body along the bottom edge and fold it ' +
         'up — press the side seams flat and the flat pieces become a box.',

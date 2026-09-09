@@ -17,6 +17,7 @@
  * frame. The fold itself renders through the pure pose function; this module
  * only moves the timeline value.
  */
+import { createGlossaryPopover, renderAnnotatedText } from './glossaryDom';
 import type { FrameScheduler } from './walkthroughMotion';
 import {
   easedProgress01,
@@ -102,6 +103,10 @@ export function createAssemblyControls(
   const bar = document.createElement('div');
   bar.className = 'assembly-bar';
 
+  // UX-07 glossary: one popover serves the counter, notes, and learn card.
+  // Close it when the labels it may be anchored to are rebuilt.
+  const popover = createGlossaryPopover();
+
   const exitButton = document.createElement('button');
   exitButton.type = 'button';
   exitButton.className = 'assembly-btn assembly-exit';
@@ -147,13 +152,17 @@ export function createAssemblyControls(
   const learnCard = document.createElement('p');
   learnCard.className = 'assembly-learn-card';
   learnCard.hidden = true;
-  learnCard.textContent = options.learnCard;
+  renderAnnotatedText(learnCard, options.learnCard, { popover });
 
   bar.append(heading, counter, slider, buttonsRow, note, learnCard, exitButton);
   container.appendChild(bar);
 
   let value = 0;
   let disposed = false;
+
+  // Chip DOM is rebuilt only when the visible step (or its completion)
+  // changes — tween frames re-render ~60×/s and must not churn it.
+  let renderedLabelKey: string | null = null;
 
   // --- Value tween (UX-01): button steps glide v to the target boundary ----
   const scheduler: FrameScheduler = options.scheduler ?? rafFrameScheduler;
@@ -213,17 +222,32 @@ export function createAssemblyControls(
     const state = scrubStateFromValue(value, stepCount);
     slider.value = String(value);
     if (stepCount === 0) {
-      counter.textContent = 'No seams to assemble';
-      note.textContent = 'This project has no assembly steps yet.';
+      if (renderedLabelKey !== 'empty') {
+        renderedLabelKey = 'empty';
+        counter.textContent = 'No seams to assemble';
+        note.textContent = 'This project has no assembly steps yet.';
+      }
       prevButton.disabled = true;
       nextButton.disabled = true;
       slider.disabled = true;
       return;
     }
     const label = options.labels[state.stepIndex]!;
-    counter.textContent = `Seam ${state.stepIndex + 1} of ${stepCount} — ${label.title}`;
-    note.textContent = label.note;
-    learnCard.hidden = !(state.stepIndex === stepCount - 1 && state.t === 1);
+    const completed = state.stepIndex === stepCount - 1 && state.t === 1;
+    const labelKey = `${state.stepIndex}:${completed}`;
+    if (labelKey !== renderedLabelKey) {
+      renderedLabelKey = labelKey;
+      popover.close();
+      counter.replaceChildren();
+      renderAnnotatedText(
+        counter,
+        `Seam ${state.stepIndex + 1} of ${stepCount} — ${label.title}`,
+        { popover },
+      );
+      note.replaceChildren();
+      renderAnnotatedText(note, label.note, { popover });
+    }
+    learnCard.hidden = !completed;
     prevButton.disabled = value <= 0;
     nextButton.disabled = value >= stepCount;
     options.onScrub(state);
@@ -270,6 +294,7 @@ export function createAssemblyControls(
     },
     dispose() {
       disposed = true;
+      popover.dispose();
       bar.remove();
     },
   };

@@ -134,6 +134,7 @@ function notebookHolderAssembly(): SeamStep[] {
         { pieceId: 'cover', startVertex: 4, edgeCount: 1 },
       ],
       order: 1,
+      name: 'Flap seam',
       note:
         'Lay the flap printed-side down on the cover, line up the straight ' +
         'top edges, and sew. The flap will fold down over the front.',
@@ -146,6 +147,7 @@ function notebookHolderAssembly(): SeamStep[] {
         { pieceId: 'cover', startVertex: 6, edgeCount: 1 },
       ],
       order: 2,
+      name: 'Pocket seam',
       note:
         'Fold the pocket onto the cover along the long left edge — you cut ' +
         'two, so repeat for the second pocket on the other side.',

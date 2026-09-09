@@ -118,12 +118,16 @@ describe('scrubStateFromValue', () => {
   });
 });
 
+/** Text as the learner reads it: the ⓘ affordance stripped, gaps collapsed. */
+const visibleText = (el: HTMLElement): string =>
+  el.textContent!.replaceAll('ⓘ', '').replace(/\s+/g, ' ');
+
 describe('assembly controls', () => {
   it('renders the first seam label on mount and emits its state', () => {
     const ui = mount();
-    expect(ui.counter.textContent).toContain('Seam 1 of 2');
-    expect(ui.counter.textContent).toContain('Seam 1 title');
-    expect(ui.note.textContent).toBe('Seam 1 note');
+    expect(visibleText(ui.counter)).toContain('Seam 1 of 2');
+    expect(visibleText(ui.counter)).toContain('Seam 1 title');
+    expect(visibleText(ui.note)).toBe('Seam 1 note');
     expect(ui.states[0]).toEqual({ stepIndex: 0, t: 0 });
     expect(ui.prev.disabled).toBe(true);
   });
@@ -143,10 +147,10 @@ describe('assembly controls', () => {
     // Mid-tween the fold is in progress (eased quarter: 4·(0.25)³ = 0.0625).
     ui.clock.advance(FOLD_MS.straightForward / 4);
     expect(ui.handle.state).toEqual({ stepIndex: 0, t: 0.0625 });
-    expect(ui.counter.textContent).toContain('Seam 1 of 2');
+    expect(visibleText(ui.counter)).toContain('Seam 1 of 2');
     ui.clock.advance(FOLD_MS.straightForward);
     expect(ui.handle.state).toEqual({ stepIndex: 1, t: 0 });
-    expect(ui.counter.textContent).toContain('Seam 2 of 2');
+    expect(visibleText(ui.counter)).toContain('Seam 2 of 2');
     ui.next.click();
     ui.clock.advance(FOLD_MS.straightForward);
     expect(ui.handle.state).toEqual({ stepIndex: 1, t: 1 });
@@ -306,5 +310,90 @@ describe('assembly controls', () => {
       'Fold progress scrubber',
     );
     expect(ui.slider.getAttribute('aria-valuemax')).toBe('2');
+  });
+});
+
+describe('vocabulary layer (UX-07): terms chip where the user is looking', () => {
+  /** Mount with real-shape jargon copy so the chip surfaces are exercised. */
+  function mountGlossary(reducedMotion = true) {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const clock = createTestScheduler();
+    const handle = createAssemblyControls(container, {
+      labels: [
+        {
+          title: 'Rise seam: Front → Back',
+          note: 'Stay-stitch both crotch curves — ease the front gently.',
+        },
+        { title: 'Flap → Outer cover', note: 'Sew the flap to the cover.' },
+      ],
+      learnCard: 'Press the side seams flat to finish.',
+      onScrub: () => {},
+      onExit: () => {},
+      scheduler: clock.scheduler,
+      reducedMotion: () => reducedMotion,
+    });
+    const counter = container.querySelector(
+      '.assembly-counter',
+    ) as HTMLElement;
+    const note = container.querySelector('.assembly-note') as HTMLElement;
+    const learnCard = container.querySelector(
+      '.assembly-learn-card',
+    ) as HTMLElement;
+    const chips = (el: HTMLElement): HTMLButtonElement[] =>
+      [...el.querySelectorAll<HTMLButtonElement>('.term-chip')];
+    // The controls' popover is the last element it appended to the body.
+    const card = document.body.lastElementChild as HTMLElement;
+    return { container, handle, clock, counter, note, learnCard, chips, card };
+  }
+
+  it('chips sewing terms in the counter and step note, copy intact', () => {
+    const ui = mountGlossary();
+    expect(visibleText(ui.counter)).toContain('Rise seam');
+    expect(
+      ui.chips(ui.counter).map((c) => c.getAttribute('aria-label')),
+    ).toEqual(['What does “seam” mean?', 'What does “rise” mean?']);
+    expect(ui.chips(ui.note).map((c) => c.getAttribute('aria-label'))).toEqual([
+      'What does “stay-stitch” mean?',
+      'What does “ease” mean?',
+    ]);
+    expect(visibleText(ui.note)).toContain(
+      'Stay-stitch both crotch curves — ease the front gently.',
+    );
+    ui.handle.dispose();
+    ui.container.remove();
+  });
+
+  it('opens the definition from a step note chip', () => {
+    const ui = mountGlossary();
+    ui.chips(ui.note)[0]!.click();
+    expect(ui.card.hidden).toBe(false);
+    expect(ui.card.querySelector('.glossary-popover-term')?.textContent).toBe(
+      'stay-stitch',
+    );
+    ui.handle.dispose();
+    ui.container.remove();
+  });
+
+  it('rebuilds the chips when the step changes (fresh first-use per step)', () => {
+    const ui = mountGlossary();
+    ui.handle.setValue(1);
+    expect(ui.counter.textContent).toContain('Flap → Outer cover');
+    // The second step's counter chips "seam" again: each step's copy is
+    // annotated on its own first use, and "Flap → Outer cover" has no terms.
+    expect(
+      ui.chips(ui.counter).map((c) => c.getAttribute('aria-label')),
+    ).toEqual(['What does “seam” mean?']);
+    ui.handle.dispose();
+    ui.container.remove();
+  });
+
+  it('does not churn chip DOM on tween frames within a step', () => {
+    const ui = mountGlossary(false);
+    const chipBefore = ui.chips(ui.counter)[0];
+    ui.handle.setValue(0.5); // mid-seam frame: same label, same chips
+    expect(ui.chips(ui.counter)[0]).toBe(chipBefore);
+    ui.handle.dispose();
+    ui.container.remove();
   });
 });
