@@ -514,6 +514,20 @@ button:active:not(:disabled) {
   line-height: 1.45;
 }
 
+/* UX-03 empty state: this project declares no adjustable parameters. Same
+   narrative voice as the status bar (explain why + next action), but
+   persistent — the bar's latest-event-wins rule would bury it under the
+   starter's learn card within one tick. */
+.measurements-empty {
+  margin: 0;
+  padding: 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-s);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--ink-dim);
+}
+
 .measurement-fields {
   display: flex;
   flex-direction: column;

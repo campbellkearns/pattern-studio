@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { Vector3 } from 'three';
 import { createStarterProject } from '../model';
-import type { StarterProject } from '../model';
+import type { PathCmd, StarterProject } from '../model';
 import { evaluateAssemblyPose, planAssembly } from '../engine/assembly';
-import type { PantMeasurements } from '../engine/titanSettings';
 import { TITAN_PANTS_TEMPLATE } from '../engine/titanSettings';
 import { STARTERS, starterById } from './starters';
 import { TOILETRY_ROLLUP_STARTER } from './toiletryRollup';
@@ -168,23 +167,62 @@ describe('starter registry ladder', () => {
     }
   });
 
-  it('redrafts the fixed-size starters to identical fresh geometry', () => {
-    // The blueprint defines no dimensions for these rungs, so every
-    // measurement yields the same validated pieces — new objects each call
-    // (redraft swaps the live pieces, so sharing would alias mutations).
-    const small: PantMeasurements = TITAN_PANTS_TEMPLATE;
-    const large: PantMeasurements = {
-      ...TITAN_PANTS_TEMPLATE,
-      waistCm: 140,
-      hipCm: 160,
-      inseamCm: 50,
-    };
-    for (const id of ['starter-toiletry-rollup', 'starter-tote']) {
-      const entry = starterById(id)!;
-      const atSmall = entry.redraft(small);
-      const atLarge = entry.redraft(large);
-      expect(JSON.stringify(atLarge)).toEqual(JSON.stringify(atSmall));
-      expect(atLarge[0]).not.toBe(atSmall[0]);
+  /** X-extent of an outline (for asserting parametric resizing). */
+  function outlineMaxX(outline: readonly PathCmd[]): number {
+    const xs: number[] = [];
+    for (const cmd of outline) {
+      if (cmd.type !== 'Z') xs.push(cmd.point.x);
+      if (cmd.type === 'C') xs.push(cmd.control1.x, cmd.control2.x);
     }
+    return Math.max(...xs);
+  }
+
+  describe('parameter schemas (UX-03)', () => {
+    it('declares redraft exactly when parameters exist', () => {
+      for (const entry of STARTERS) {
+        if (entry.parameters.length > 0) {
+          expect(entry.redraft).toBeTypeOf('function');
+        } else {
+          expect(entry.redraft).toBeUndefined();
+        }
+      }
+    });
+
+    it('the notebook holder declares no parameters — no pants fields, ever', () => {
+      // The reported bug: pants measurements showed while the notebook
+      // holder was selected. Its schema must stay empty.
+      const entry = starterById('starter-notebook-holder')!;
+      expect(entry.parameters).toHaveLength(0);
+    });
+
+    it('the pants starter declares exactly the eight Titan parameters', () => {
+      const entry = starterById('starter-pants')!;
+      expect(entry.parameters.map((spec) => spec.key)).toEqual(
+        Object.keys(TITAN_PANTS_TEMPLATE),
+      );
+    });
+
+    it('pants redraft consumes schema-keyed values and resizes the waistband', () => {
+      const entry = starterById('starter-pants')!;
+      const values: Record<string, number> = {};
+      for (const spec of entry.parameters) values[spec.key] = spec.value;
+      const pieces = entry.redraft!(values);
+      expect(pieces.map((piece) => piece.id)).toContain('waistband');
+
+      const band = pieces.find((piece) => piece.id === 'waistband')!;
+      const wideBand = entry
+        .redraft!({ ...values, waistCm: 140 })
+        .find((piece) => piece.id === 'waistband')!;
+      expect(outlineMaxX(wideBand.outline)).toBeGreaterThan(
+        outlineMaxX(band.outline),
+      );
+    });
+
+    it('pants redraft fails loudly on a missing schema key, not silently', () => {
+      const entry = starterById('starter-pants')!;
+      // A value map missing a declared key cannot draft — the MeasurementError
+      // is what keeps the last valid pattern on the mat.
+      expect(() => entry.redraft!({ waistCm: 90 })).toThrow(/must be finite/);
+    });
   });
 });

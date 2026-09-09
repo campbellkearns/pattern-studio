@@ -1,84 +1,32 @@
 /**
- * Measurements panel: the ≤8-field R3-capped control surface (blueprint R3)
- * that drives parametric redrafting. Pure input plumbing — parsing, clamped
- * state, and change notification live here; running the redraft and updating
- * the viewport stay with the app shell, so a failed draft can never leave
- * this panel holding half-updated DOM state.
+ * Measurements panel: the schema-driven control surface (UX-03) that drives
+ * parametric redrafting. The active project declares its adjustable
+ * parameters (see model/parameters.ts); this panel renders exactly that
+ * schema — label, bounds, step, unit, declared value — and nothing else, so
+ * a notebook holder can never show pants fields. A project with an empty
+ * schema gets the narrated empty state (PRD states table: Empty → explain
+ * why + offer a useful next action).
+ *
+ * Pure input plumbing — parsing, clamped state, and change notification live
+ * here; running the redraft and updating the viewport stay with the app
+ * shell, so a failed draft can never leave this panel holding half-updated
+ * DOM state.
  *
  * Off-happy-path states per the blueprint: a non-numeric or empty field is
  * marked invalid and suppresses redrafting (the last valid draft stays on
  * the mat), and a draft failure surfaces through showDraftError() while the
  * panel keeps accepting input.
  */
-import {
-  PANT_MEASUREMENT_RANGES,
-  TITAN_PANTS_TEMPLATE,
-  clampMeasurements,
-} from '../engine/titanSettings';
-import type { PantMeasurements } from '../engine/titanSettings';
-
-type MeasurementKey = keyof PantMeasurements;
-
-interface FieldMeta {
-  readonly label: string;
-  readonly explainer: string;
-}
-
-/** Pedagogical labels + per-field fit explainers (blueprint F4). */
-const FIELD_META: Record<MeasurementKey, FieldMeta> = {
-  waistCm: {
-    label: 'Waist',
-    explainer: 'Body circumference where the waistband sits.',
-  },
-  hipCm: {
-    label: 'Hip',
-    explainer: 'Circumference at the fullest point of the seat.',
-  },
-  risePct: {
-    label: 'Rise',
-    explainer:
-      'Where the waistband sits: 100 = natural waist, lower rides on the hips.',
-  },
-  inseamCm: {
-    label: 'Inseam',
-    explainer: 'Crotch to hem, measured along the inner leg.',
-  },
-  crotchDropPct: {
-    label: 'Crotch depth',
-    explainer: 'Extra depth below the fork so the pants can move.',
-  },
-  kneeEasePct: {
-    label: 'Knee ease',
-    explainer: 'Extra width at the knee for bending the leg.',
-  },
-  easePct: {
-    label: 'Seat ease',
-    explainer: 'Wearing ease added across the seat.',
-  },
-  waistEasePct: {
-    label: 'Waist ease',
-    explainer: 'Wearing ease added at the waistband.',
-  },
-};
-
-const UNITS: Record<MeasurementKey, string> = {
-  waistCm: 'cm',
-  hipCm: 'cm',
-  risePct: '%',
-  inseamCm: 'cm',
-  crotchDropPct: '%',
-  kneeEasePct: '%',
-  easePct: '%',
-  waistEasePct: '%',
-};
+import { clampValues, defaultValues } from '../model/parameters';
+import type { ParameterSchema, ParameterValues } from '../model/parameters';
 
 export interface MeasurementsPanelCallbacks {
-  /** Called with clamped, complete measurements on every valid change. */
-  onRedraft(measurements: PantMeasurements): void;
+  /** Called with clamped, complete parameter values on every valid change. */
+  onRedraft(values: ParameterValues): void;
 }
 
 export interface MeasurementsPanelHandle {
-  getMeasurements(): PantMeasurements;
+  getValues(): ParameterValues;
   resetToDefaults(): void;
   /** Show (or clear) a draft-failure message; the draft itself is unchanged. */
   showDraftError(message: string | null): void;
@@ -87,7 +35,7 @@ export interface MeasurementsPanelHandle {
 
 export function createMeasurementsPanel(
   container: HTMLElement,
-  initial: PantMeasurements,
+  schema: ParameterSchema,
   callbacks: MeasurementsPanelCallbacks,
 ): MeasurementsPanelHandle {
   container.innerHTML = '';
@@ -95,6 +43,28 @@ export function createMeasurementsPanel(
   const heading = document.createElement('h2');
   heading.textContent = 'Measurements';
   container.appendChild(heading);
+
+  // Narrated empty state: this project declares no adjustable parameters.
+  // Explain why and offer the next action, in the status bar's narrative
+  // voice — but persistent, because the bar's latest-event-wins rule would
+  // bury this under the starter's learn card within one tick.
+  if (schema.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'measurements-empty';
+    empty.textContent =
+      'This project is drafted at fixed sizes, so it has no adjustable ' +
+      'measurements. To see live redrafting, pick the Pants starter — its ' +
+      'measurements reshape the pattern as you type.';
+    container.appendChild(empty);
+    return {
+      getValues: () => ({}),
+      resetToDefaults: () => {},
+      showDraftError: () => {},
+      dispose: () => {
+        container.innerHTML = '';
+      },
+    };
+  }
 
   const hint = document.createElement('p');
   hint.className = 'measurements-hint';
@@ -105,43 +75,39 @@ export function createMeasurementsPanel(
   form.className = 'measurement-fields';
   container.appendChild(form);
 
-  let current: PantMeasurements = { ...initial };
+  let current: Record<string, number> = { ...defaultValues(schema) };
   const fields: {
-    key: MeasurementKey;
     input: HTMLInputElement;
     handler: () => void;
     changeHandler: () => void;
   }[] = [];
 
-  for (const key of Object.keys(PANT_MEASUREMENT_RANGES) as MeasurementKey[]) {
-    const range = PANT_MEASUREMENT_RANGES[key];
-    const meta = FIELD_META[key];
-
+  for (const spec of schema) {
     const row = document.createElement('label');
     row.className = 'measurement-field';
-    row.title = meta.explainer;
+    row.title = spec.explainer;
 
     const name = document.createElement('span');
     name.className = 'measurement-label';
-    name.textContent = meta.label;
+    name.textContent = spec.label;
 
     const input = document.createElement('input');
     input.type = 'number';
-    input.id = `measurement-${key}`;
-    input.name = key;
-    input.min = String(range.min);
-    input.max = String(range.max);
-    input.step = String(range.step);
-    input.value = String(initial[key]);
-    input.setAttribute('aria-label', `${meta.label} — ${meta.explainer}`);
+    input.id = `measurement-${spec.key}`;
+    input.name = spec.key;
+    input.min = String(spec.min);
+    input.max = String(spec.max);
+    input.step = String(spec.step);
+    input.value = String(spec.value);
+    input.setAttribute('aria-label', `${spec.label} — ${spec.explainer}`);
 
     const unit = document.createElement('span');
     unit.className = 'measurement-unit';
-    unit.textContent = UNITS[key];
+    unit.textContent = spec.unit;
 
     const explainer = document.createElement('span');
     explainer.className = 'measurement-explainer';
-    explainer.textContent = meta.explainer;
+    explainer.textContent = spec.explainer;
 
     row.append(name, input, unit, explainer);
     form.appendChild(row);
@@ -165,16 +131,16 @@ export function createMeasurementsPanel(
       row.classList.remove('invalid');
       // Clamp instead of rejecting: a typed 500 cm becomes 140 and the
       // draft keeps moving — the input canonicalises on blur/change.
-      current = clampMeasurements({ ...current, [key]: parsed });
+      current = { ...clampValues(schema, { ...current, [spec.key]: parsed }) };
       callbacks.onRedraft({ ...current });
     };
     // Canonicalise the visible value on commit so clamped/derived edits show.
     const changeHandler = (): void => {
-      input.value = String(current[key]);
+      input.value = String(current[spec.key]);
     };
     input.addEventListener('input', handler);
     input.addEventListener('change', changeHandler);
-    fields.push({ key, input, handler, changeHandler });
+    fields.push({ input, handler, changeHandler });
   }
 
   const controls = document.createElement('div');
@@ -193,9 +159,9 @@ export function createMeasurementsPanel(
   container.appendChild(draftError);
 
   const resetHandler = (): void => {
-    current = { ...TITAN_PANTS_TEMPLATE };
+    current = { ...defaultValues(schema) };
     for (const { input } of fields) {
-      input.value = String(current[input.name as MeasurementKey]);
+      input.value = String(current[input.name]);
       input.removeAttribute('aria-invalid');
       input.closest('.measurement-field')?.classList.remove('invalid');
     }
@@ -205,7 +171,7 @@ export function createMeasurementsPanel(
   resetButton.addEventListener('click', resetHandler);
 
   return {
-    getMeasurements: () => ({ ...current }),
+    getValues: () => ({ ...current }),
     resetToDefaults: resetHandler,
     showDraftError(message: string | null): void {
       if (message === null) {
