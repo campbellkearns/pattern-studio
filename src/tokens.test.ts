@@ -86,4 +86,23 @@ describe('five-token design system (UX-06)', () => {
     expect(AMBER_INK).toBe('#6B4400');
     expect(AZURE_LINE).toBe('#4F6C9E');
   });
+
+  it('derives the workroom table inside its stated token ramps (UX-04)', () => {
+    // A derivation introduces no sixth hue when every RGB channel stays
+    // within the span of the two colors it lerps — pin exactly that.
+    const channels = (hex: string): number[] =>
+      [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+    const withinRamp = (hex: string, a: string, b: string): boolean => {
+      const c = channels(hex);
+      return c.every(
+        (v, i) =>
+          v >= Math.min(channels(a)[i], channels(b)[i]) &&
+          v <= Math.max(channels(a)[i], channels(b)[i]),
+      );
+    };
+    // tableTop: Blueprint Tint deepened toward Grid Azure.
+    expect(withinRamp(SCENE.tableTop, BLUEPRINT_TINT, GRID_AZURE)).toBe(true);
+    // tableEdge: tableTop deepened toward Azure Line.
+    expect(withinRamp(SCENE.tableEdge, SCENE.tableTop, AZURE_LINE)).toBe(true);
+  });
 });

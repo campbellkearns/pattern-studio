@@ -1,12 +1,13 @@
 /**
- * Shared surface meshes for both viewports: the fixed reference mat and the
- * paper roll beyond its far edge, plus the dashed boundary between them.
- * One definition (the blueprint's build acceptance forbids a second one) —
- * each viewport adds `group` to its scene and calls `setPaperExtent` with
- * the project's paper extent. Browser-only; the geometry it consumes is
- * unit-tested in matTexture/paperTexture/matSurface.
+ * Shared surface meshes for both viewports: the workroom table (UX-04), the
+ * fixed reference mat, and the paper roll beyond its far edge, plus the
+ * dashed boundary between them. One definition (the blueprint's build
+ * acceptance forbids a second one) — each viewport adds `group` to its scene
+ * and calls `setPaperExtent` with the project's paper extent. Browser-only;
+ * the geometry it consumes is unit-tested in matTexture/paperTexture/matSurface.
  */
 import {
+  BoxGeometry,
   BufferGeometry,
   DoubleSide,
   Group,
@@ -18,12 +19,17 @@ import {
   PlaneGeometry,
   Vector3,
 } from 'three';
+import { SCENE } from '../tokens';
 import type { BoundsCm } from './matSurface';
 import {
   MAT_DEPTH_CM,
   MAT_WIDTH_CM,
   MAT_TILE_CM,
   PAPER_SURFACE_Y_CM,
+  TABLE_DEPTH_CM,
+  TABLE_THICKNESS_CM,
+  TABLE_TOP_Y_CM,
+  TABLE_WIDTH_CM,
   paperSurfaceExtentCm,
 } from './matSurface';
 import { createMatTexture } from './matTexture';
@@ -43,7 +49,7 @@ const LABEL_LIFT_CM = 0.05;
 const BOUNDARY_DASH_CM = { dash: 4, gap: 3 } as const;
 
 export interface SurfaceMeshes {
-  /** Add to the scene; holds mat, paper, label, and boundary meshes. */
+  /** Add to the scene; holds table, mat, paper, label, and boundary meshes. */
   readonly group: Group;
   /** Rebuild the paper roll for a new extent (redraft can grow it). */
   setPaperExtent(extent: BoundsCm): void;
@@ -52,6 +58,36 @@ export interface SurfaceMeshes {
 
 export function createSurfaceMeshes(): SurfaceMeshes {
   const group = new Group();
+
+  // --- Workroom table (UX-04): the mat rests on it instead of floating ----
+  // One slab; BoxGeometry's face order is [+x, -x, +y(top), -y, +z, -z], so
+  // the top face wears tableTop and the five edge faces wear tableEdge.
+  const tableGeometry = new BoxGeometry(
+    TABLE_WIDTH_CM,
+    TABLE_THICKNESS_CM,
+    TABLE_DEPTH_CM,
+  );
+  const tableTopMaterial = new MeshStandardMaterial({
+    color: SCENE.tableTop,
+    roughness: 0.95,
+    metalness: 0,
+  });
+  const tableEdgeMaterial = new MeshStandardMaterial({
+    color: SCENE.tableEdge,
+    roughness: 0.95,
+    metalness: 0,
+  });
+  const table = new Mesh(tableGeometry, [
+    tableEdgeMaterial,
+    tableEdgeMaterial,
+    tableTopMaterial,
+    tableEdgeMaterial,
+    tableEdgeMaterial,
+    tableEdgeMaterial,
+  ]);
+  table.position.y = TABLE_TOP_Y_CM - TABLE_THICKNESS_CM / 2;
+  table.receiveShadow = true;
+  group.add(table);
 
   // --- Fixed reference mat (true cm print, one full-mat canvas) -----------
   const matGeometry = new PlaneGeometry(MAT_WIDTH_CM, MAT_DEPTH_CM);
@@ -64,6 +100,9 @@ export function createSurfaceMeshes(): SurfaceMeshes {
   const mat = new Mesh(matGeometry, matMaterial);
   mat.rotation.x = -Math.PI / 2;
   mat.receiveShadow = true;
+  // The mat casts a contact shadow onto the table — the cue that it rests
+  // there rather than hovering (UX-04).
+  mat.castShadow = true;
   group.add(mat);
 
   // --- Paper roll (seamless spot-and-cross tile, extent-driven) -----------
@@ -77,6 +116,7 @@ export function createSurfaceMeshes(): SurfaceMeshes {
   const paper = new Mesh(paperGeometry, paperMaterial);
   paper.rotation.x = -Math.PI / 2;
   paper.receiveShadow = true;
+  paper.castShadow = true;
 
   // The paper's own dimension label — a small transparent plane on the roll.
   const labelGeometry = new PlaneGeometry(
@@ -146,6 +186,9 @@ export function createSurfaceMeshes(): SurfaceMeshes {
   setPaperExtent(paperSurfaceExtentCm(null));
 
   const dispose = (): void => {
+    tableGeometry.dispose();
+    tableTopMaterial.dispose();
+    tableEdgeMaterial.dispose();
     matGeometry.dispose();
     matTexture.dispose();
     matMaterial.dispose();

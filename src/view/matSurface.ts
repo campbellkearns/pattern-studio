@@ -92,6 +92,35 @@ export function surfaceHeightCm(surface: SurfaceId): number {
   return surface === 'mat' ? MAT_SURFACE_Y_CM : PAPER_SURFACE_Y_CM;
 }
 
+// --- Workroom environment (UX-04) ------------------------------------------
+
+/**
+ * The cutting table the mat rests on: one slab, centred on the mat, sized
+ * to give working room beyond the mat and paper on every side (the mat is
+ * 150 × 100; the table leaves ~95 cm of table left/right and ~80 cm front/
+ * back). Pure constants — the mesh that consumes them lives in
+ * surfaceMeshes.ts.
+ */
+export const TABLE_WIDTH_CM = 340;
+export const TABLE_DEPTH_CM = 260;
+/** Tabletop thickness — thin, so the slab reads as a surface, not furniture. */
+export const TABLE_THICKNESS_CM = 4;
+/**
+ * Tabletop height: below the paper surface (-0.15) so both mat and paper
+ * visibly rest on it. The 1.05 cm step is far enough apart to never
+ * z-fight at grazing angles while reading as a mat's real-world thickness.
+ */
+export const TABLE_TOP_Y_CM = -1.2;
+
+/**
+ * The soft room-air fade (scene fog), in world centimetres: the work area
+ * stays crisp because the fade begins beyond the mat's farthest corner
+ * (hypot(150, 100) ≈ 180 cm from centre) plus camera framing margin, and
+ * the table edge only dissolves into the drafting-room air at distance.
+ */
+export const ROOM_FOG_NEAR_CM = 380;
+export const ROOM_FOG_FAR_CM = 1500;
+
 // --- Paper mesh extent ------------------------------------------------------
 
 /**
