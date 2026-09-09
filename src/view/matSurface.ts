@@ -7,6 +7,8 @@
  * Pure constants and pure functions — jsdom-safe by construction.
  */
 
+import type { SurfaceId } from './layout';
+
 /** The fixed reference mat, in true centimetres (1 world unit = 1 cm). */
 export const MAT_WIDTH_CM = 150;
 export const MAT_DEPTH_CM = 100;
@@ -72,5 +74,50 @@ export function paperBoundsCm(work: BoundsCm): BoundsCm {
     minY: work.minY - PAPER_MARGIN_CM,
     maxX: work.maxX + PAPER_MARGIN_CM,
     maxY: work.maxY + PAPER_MARGIN_CM,
+  };
+}
+
+// --- Render heights -------------------------------------------------------
+
+/**
+ * The mat's top face is the world floor; the paper roll lies just below it —
+ * a real mat is thicker than a sheet of paper. The 0.15 cm step keeps the
+ * two surfaces' shared far edge readable without visibly floating pieces.
+ */
+export const MAT_SURFACE_Y_CM = 0;
+export const PAPER_SURFACE_Y_CM = -0.15;
+
+/** Render height of the surface a placement landed on. */
+export function surfaceHeightCm(surface: SurfaceId): number {
+  return surface === 'mat' ? MAT_SURFACE_Y_CM : PAPER_SURFACE_Y_CM;
+}
+
+// --- Paper mesh extent ------------------------------------------------------
+
+/**
+ * The paper surface's rendered extent. The paper exists only beyond the
+ * mat's far edge, so the mesh starts at the far edge (placement y =
+ * MAT_DEPTH_CM) and runs to the paper bounds' far side — the paper bounds'
+ * near-side margin from paperBoundsCm is subsumed by the mat covering that
+ * ground. When the work wouldn't push the paper past a minimal apron (or
+ * there is no work at all), the roll still shows a PAPER_MARGIN_CM apron
+ * beyond the far edge: the roll is a physical presence even when the work
+ * fits on the mat.
+ */
+export function paperSurfaceExtentCm(work: BoundsCm | null): BoundsCm {
+  if (!work) {
+    return {
+      minX: 0,
+      minY: MAT_DEPTH_CM,
+      maxX: MAT_WIDTH_CM,
+      maxY: MAT_DEPTH_CM + PAPER_MARGIN_CM,
+    };
+  }
+  const paper = paperBoundsCm(work);
+  return {
+    minX: paper.minX,
+    maxX: paper.maxX,
+    minY: MAT_DEPTH_CM,
+    maxY: Math.max(paper.maxY, MAT_DEPTH_CM + PAPER_MARGIN_CM),
   };
 }
