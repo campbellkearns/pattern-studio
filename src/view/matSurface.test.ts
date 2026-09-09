@@ -10,6 +10,7 @@ import {
   paperSurfaceExtentCm,
   surfaceHeightCm,
   workBoundsCm,
+  workOverflowsMat,
 } from './matSurface';
 
 describe('mat surface constants', () => {
@@ -49,6 +50,41 @@ describe('paperBoundsCm', () => {
     expect(paper.minY).toBe(work.minY - PAPER_MARGIN_CM);
     expect(paper.maxX).toBe(work.maxX + PAPER_MARGIN_CM);
     expect(paper.maxY).toBe(work.maxY + PAPER_MARGIN_CM);
+  });
+});
+
+describe('workOverflowsMat', () => {
+  it('is false when there is no work', () => {
+    expect(workOverflowsMat(null)).toBe(false);
+  });
+
+  it('is false while the work sits inside the mat, edge included', () => {
+    expect(workOverflowsMat({ minX: 6, minY: 6, maxX: 82, maxY: 100 })).toBe(
+      false,
+    );
+  });
+
+  it('is true when the work crosses the mat’s far edge onto the paper', () => {
+    expect(workOverflowsMat({ minX: 6, minY: 6, maxX: 82, maxY: 127 })).toBe(
+      true,
+    );
+  });
+
+  it('is true on any side overflow, not just the far edge', () => {
+    expect(
+      workOverflowsMat({
+        minX: 0,
+        minY: 0,
+        maxX: MAT_WIDTH_CM + 1,
+        maxY: 50,
+      }),
+    ).toBe(true);
+    expect(workOverflowsMat({ minX: -2, minY: 0, maxX: 40, maxY: 50 })).toBe(
+      true,
+    );
+    expect(workOverflowsMat({ minX: 0, minY: -2, maxX: 40, maxY: 50 })).toBe(
+      true,
+    );
   });
 });
 
