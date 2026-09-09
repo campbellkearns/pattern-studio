@@ -128,6 +128,7 @@ function toiletryRollupAssembly(): SeamStep[] {
         { pieceId: 'body', startVertex: 0, edgeCount: 1 },
       ],
       order: 1,
+      name: 'Pocket seam',
       note:
         'Sew the pocket strip to the body along the top edge, then fold it ' +
         'down over the body — the fold line splits it into compartments.',
@@ -140,6 +141,7 @@ function toiletryRollupAssembly(): SeamStep[] {
         { pieceId: 'body', startVertex: 2, edgeCount: 1 },
       ],
       order: 2,
+      name: 'Roll flap seam',
       note:
         'Sew the flap to the body along the bottom edge and fold it up — ' +
         'it covers the pockets when you roll everything from the top.',

@@ -5,11 +5,17 @@
  * selection without relying on hover. The toolbar (F7, projects as data)
  * carries localStorage save/load and JSON import/export; every persistence
  * outcome — including failures — is narrated in the status bar, never silent.
- * The measurements panel drives the M2 parametric redraft: a measurement
- * change redrafts the pieces live, and a failed draft keeps the last valid
- * pattern on the mat.
+ * State linkage (UX-05) is centralized in src/appState.ts: the shell holds
+ * one AppState and never mutates a surface directly — every interaction
+ * dispatches a pure transition, and the shell applies the transition's
+ * effects to the surfaces in the model's canonical order. Selection, mode,
+ * project pieces, and fabric therefore cannot drift apart: entering assembly
+ * clears the selection, fabric changes write through to the project (so
+ * remounts and Save/Export/Share keep them), and redrafts re-plan the
+ * assembly walkthrough instead of silently desyncing it.
  */
 import { starterById, STARTERS } from './data/starters';
+import { EMPTY_PARAMETERS } from './model';
 import type { Project } from './model';
 import {
   loadProject,
@@ -36,17 +42,36 @@ import {
 } from './view/shortcuts';
 import { statusClassName } from './view/statusTone';
 import type { StatusTone } from './view/statusTone';
-import { TITAN_PANTS_TEMPLATE } from './engine/titanSettings';
-import { redraftPants } from './engine/titanPants';
 import { createAssemblyControls } from './view/assemblyControls';
 import type { AssemblyControlsHandle } from './view/assemblyControls';
+import { createGlossaryPopover, renderAnnotatedText } from './view/glossaryDom';
+import { foldDurationMs, seamIsCurved } from './view/walkthroughMotion';
 import { createAssemblyView } from './view/assemblyView';
 import type { AssemblyView } from './view/assemblyView';
 import { createMeasurementsPanel } from './view/measurementsPanel';
+import type { MeasurementsPanelHandle } from './view/measurementsPanel';
 import { createPiecePanel } from './view/panel';
 import type { PanelHandle } from './view/panel';
+import { createMaterialsLegend } from './view/legend';
+import type { MaterialsLegendHandle } from './view/legend';
 import { supportsWebGL2 } from './view/webgl';
 import { createSelectionStore } from './view/selection';
+import type { SelectionStore } from './view/selection';
+import {
+  applyAppState,
+  applyFabric,
+  assemblyEntryMessage,
+  enterAssembly,
+  exitAssembly,
+  initialAppState,
+  mirrorSelection,
+  NOTHING_SELECTED_MESSAGE,
+  redraftPieces,
+  selectPiece,
+  statusText,
+  switchProject,
+} from './appState';
+import type { AppState, TransitionResult } from './appState';
 import { createViewport } from './view/viewport';
 import type { Viewport } from './view/viewport';
 
@@ -174,7 +199,7 @@ export function mountApp(root: HTMLElement): void {
     const entry = starterById(starterPicker.value);
     if (!entry) return;
     const starter = entry.build();
-    mountProject(starter);
+    dispatch(switchProject(state, starter));
     narrate(`Loaded starter '${entry.name}'. ${starter.learnCard}`);
   });
   actions.appendChild(starterPicker);
@@ -203,49 +228,51 @@ export function mountApp(root: HTMLElement): void {
   const status = document.createElement('div');
   status.className = 'status-bar';
   status.setAttribute('role', 'status');
-  status.textContent =
-    'Nothing selected — tap a piece or pick one from the list.';
+  status.textContent = NOTHING_SELECTED_MESSAGE;
+
+  // UX-07: the status bar narrates every outcome — teach through it. Copy is
+  // rendered through the glossary so sewing terms chip inline on first use;
+  // the popover is disposed with the page (main.ts owns the lifecycle).
+  const statusPopover = createGlossaryPopover();
 
   shell.append(toolbar, layout);
   root.append(shell, status);
 
-  // --- Live project + view lifecycle --------------------------------------
+  // --- Live state + view lifecycle -----------------------------------------
   const startup = loadStartupProject();
+  // Render-side selection store: the viewport and piece panel subscribe to
+  // it, and their taps route through the matSelection proxy below, so the
+  // state model stays the only writer.
   const selection = createSelectionStore();
-  let currentProject: Project = startup.project;
+  let state: AppState = initialAppState(startup.project);
   let viewport: Viewport | null = null;
   let assemblyView: AssemblyView | null = null;
   let assemblyControls: AssemblyControlsHandle | null = null;
   let panelHandle: PanelHandle | null = null;
+  let legendHandle: MaterialsLegendHandle | null = null;
   let fabricHandle: { dispose(): void } | null = null;
+  let measurementsHandle: MeasurementsPanelHandle | null = null;
   let unsubscribe: (() => void) | null = null;
   let assembleButton: HTMLButtonElement | null = null;
   let refitButtonHandle: RefitButtonHandle | null = null;
 
-  const statusFor = (id: string | null): string => {
-    if (!id) return 'Nothing selected — tap a piece or pick one from the list.';
-    const piece = currentProject.pieces.find((p) => p.id === id);
-    return piece
-      ? `Selected: ${piece.name} (cut ${piece.cutCount}).`
-      : `Selected: ${id}.`;
-  };
-  const renderStatus = (id: string | null): void => {
-    narrate(statusFor(id));
-  };
-
   /** Swap the live project: tear the old views down, mount fresh ones. */
   const mountProject = (project: Project): void => {
-    unsubscribe?.();
+    // Mode transitions and project switches both land here; an assembly
+    // scene cannot survive the remount.
+    disposeAssemblyScene();
     panelHandle?.dispose();
+    legendHandle?.dispose();
+    legendHandle = null;
     fabricHandle?.dispose();
-    teardownAssemblyMode();
+    measurementsHandle?.dispose();
     viewport?.dispose();
-    currentProject = project;
-    selection.select(null);
     projectTitle.textContent = project.name;
     // Keep the picker honest: a saved/imported project that is not a
-    // starter deselects it rather than lying about provenance.
-    starterPicker.value = starterById(project.id)?.id ?? '';
+    // starter deselects it rather than lying about provenance. (Selection
+    // clearing is the model's job — the transitions emit it.)
+    const entry = starterById(project.id);
+    starterPicker.value = entry?.id ?? '';
 
     canvasHolder.innerHTML = '';
     const canvas = document.createElement('canvas');
@@ -260,7 +287,11 @@ export function mountApp(root: HTMLElement): void {
         canvas,
         container: canvasHolder,
         project,
-        selection,
+        selection: matSelection,
+        // Scene-side hover lands on the legend (entry highlight); the
+        // legend's own hover lands back on the scene through onEntryHover
+        // below — one transient-attention channel, two directions.
+        onHoverChange: (id) => legendHandle?.setHover(id),
       });
     } catch (error) {
       // Never swallow: the user gets the unsupported screen with the cause.
@@ -268,23 +299,81 @@ export function mountApp(root: HTMLElement): void {
       renderUnsupported(root);
       return;
     }
-    panelHandle = createPiecePanel(piecesSection, project.pieces, selection, {
-      onPreset: (preset) => viewport?.applyPreset(preset),
-    });
-    // Fabric panel: weave / scale / colour / stripe pickers that re-skin
-    // every piece live through the viewport. Re-created per mount so a
-    // loaded or imported project's fabric seeds the controls.
-    fabricHandle = createFabricPanel(fabricSection, project.fabric, {
-      onFabricChange: (spec) => {
-        // Fabric changes follow the live mode: assembly re-skins through
-        // the assembly view, the mat through the viewport.
-        if (assemblyView) assemblyView.applyFabric(spec);
-        else viewport?.applyFabric(spec);
+    // Materials legend (UX-02): every piece on the mat, named and
+    // fabric-identified, overlaid on the viewport it describes. Entries
+    // select through the same matSelection proxy as every other surface
+    // (the state model stays the only writer), and 44 px entries keep the
+    // legend usable at the cutting table.
+    legendHandle = createMaterialsLegend(
+      canvasHolder,
+      project.pieces,
+      project.fabric,
+      matSelection,
+      { onEntryHover: (id) => viewport?.setHover(id) },
+    );
+    panelHandle = createPiecePanel(
+      piecesSection,
+      project.pieces,
+      project.assembly,
+      matSelection,
+      {
+        onPreset: (preset) => viewport?.applyPreset(preset),
       },
+    );
+    // Fabric panel: weave / scale / colour / stripe pickers that re-skin
+    // every piece live. Re-created per mount so a loaded or imported
+    // project's fabric seeds the controls; changes route through the model
+    // and write through to the project, so remounts and Save/Export/Share
+    // keep the user's fabric.
+    fabricHandle = createFabricPanel(fabricSection, project.fabric, {
+      onFabricChange: (spec) => dispatch(applyFabric(state, spec)),
     });
-    unsubscribe = selection.subscribe(renderStatus);
-    renderStatus(selection.get());
-    // The mat viewport is live again — refit has work to frame.
+    // Measurements panel: re-created per project from THAT project's
+    // declared parameter schema (UX-03) — the notebook holder never shows
+    // pants fields, and a project with no parameters gets the narrated
+    // empty state. A failed draft keeps the last valid pattern on the mat.
+    measurementsHandle = createMeasurementsPanel(
+      measurementsSection,
+      entry?.parameters ?? EMPTY_PARAMETERS,
+      {
+        onRedraft: (values) => {
+          const redraft = entry?.redraft;
+          // Unreachable through the UI — no parameters means no fields to
+          // edit — but the guard keeps the contract honest: no redraft
+          // without a declared schema.
+          if (!redraft) return;
+          try {
+            // Assembly-aware starters (pants) resolve their chains from
+            // the fresh draft; the pieces are the same set redraft
+            // returns. Plain starters plan from the project's static
+            // assembly as before.
+            const result =
+              entry?.redraftAssembly?.(values) ?? { pieces: redraft(values) };
+            // The redraft writes through the model, so Save/Export capture
+            // what is on the mat and the live scene (either mode) follows.
+            // A resolved assembly rides along — its chains are properties
+            // of the fresh draft.
+            dispatch(redraftPieces(state, result.pieces, result.assembly));
+            measurementsHandle?.showDraftError(null);
+          } catch (error) {
+            // Never swallow: surface the failure next to the fields,
+            // keeping the last valid draft on the mat.
+            console.error('redraft failed', error);
+            measurementsHandle?.showDraftError(
+              'Could not redraft with those measurements — ' +
+                'the last valid pattern is still shown. Adjust and try again.',
+            );
+          }
+        },
+      },
+    );
+    // Re-derive the selection status from the freshly mounted project so
+    // the bar never carries pre-mount text. Selection subscription itself
+    // is module-level (UX-05) — remounts must not stack listeners.
+    const text = statusText(state);
+    if (text !== null) narrate(text);
+    // The mat viewport is live again — refit has work to frame (main #16,
+    // integrated with the UX-03 remount path).
     refitButtonHandle?.setEnabled(true);
   };
 
@@ -299,26 +388,25 @@ export function mountApp(root: HTMLElement): void {
       : 'Assembly complete.';
   }
 
-  /** Remove the assembly scene + controls, restoring the mat's button. */
-  function teardownAssemblyMode(): void {
+  /** Remove the assembly scene, leaving mode ownership to the transitions. */
+  function disposeAssemblyScene(): void {
     assemblyControls?.dispose();
     assemblyControls = null;
     assemblyView?.dispose();
     assemblyView = null;
-    if (assembleButton) assembleButton.disabled = false;
   }
 
-  /** Leave assembly mode and rebuild the cutting mat. */
-  function exitAssembly(): void {
-    if (!assemblyView && !assemblyControls) return;
-    teardownAssemblyMode();
-    mountProject(currentProject);
-    narrate('Back on the cutting mat.');
-  }
-
-  /** Swap the mat for the assembly walkthrough of the current project. */
-  function enterAssembly(): void {
-    if (assemblyView) return;
+  /**
+   * Build the assembly walkthrough for the current state. Throws when the
+   * project cannot be planned (e.g. a hand-edited import with unmatchable
+   * seams); the caller keeps the mat and narrates, so the model never
+   * claims a mode the scene does not show.
+   */
+  function buildAssemblyScene(): void {
+    // The legend is a mat-mode surface and its card lives in the canvas
+    // holder this function clears — let it go with the mat it describes.
+    legendHandle?.dispose();
+    legendHandle = null;
     viewport?.dispose();
     viewport = null;
     canvasHolder.innerHTML = '';
@@ -326,92 +414,155 @@ export function mountApp(root: HTMLElement): void {
     canvas.className = 'viewport-canvas';
     canvas.style.touchAction = 'none';
     canvasHolder.appendChild(canvas);
+    assemblyView = createAssemblyView({
+      canvas,
+      container: canvasHolder,
+      project: state.project,
+    });
+    const nameOf = (id: string): string =>
+      state.project.pieces.find((p) => p.id === id)?.name ?? id;
+    // UX-07: named seams lead the counter — "Rise seam: Front → Back" — so
+    // the walkthrough teaches the seam's name where the user is looking.
+    const labels = assemblyView.plan.steps.map(({ step }) => ({
+      title: step.name
+        ? `${step.name}: ${nameOf(step.pieces[0])} → ${nameOf(step.pieces[1])}`
+        : `${nameOf(step.pieces[0])} → ${nameOf(step.pieces[1])}`,
+      note: step.note,
+    }));
+    assemblyControls = createAssemblyControls(canvasHolder, {
+      labels,
+      learnCard: starterLearnCard(state.project),
+      onScrub: (scrub) => assemblyView?.setScrub(scrub.stepIndex, scrub.t),
+      onExit: exitAssemblyToMat,
+      // UX-01 motion spec: fold duration per seam — curved seams get more
+      // time. Reduced-motion gating lives in the controls; the camera's
+      // pre-frame rides onStepBegin (the seam about to fold).
+      stepDurationMs: (stepIndex, forward) => {
+        const chain = assemblyView?.plan.steps[stepIndex]?.anchorChainWorld;
+        return foldDurationMs(forward, chain ? seamIsCurved(chain) : false);
+      },
+      onStepBegin: (stepIndex, forward) =>
+        assemblyView?.preFrameSeam(stepIndex, forward),
+    });
+  }
+
+  /** Assemble button / shortcut: swap the mat for the walkthrough. */
+  function tryEnterAssembly(): void {
+    if (state.mode === 'assembly') return;
     try {
-      assemblyView = createAssemblyView({
-        canvas,
-        container: canvasHolder,
-        project: currentProject,
-      });
+      buildAssemblyScene();
     } catch (error) {
-      // Invalid or unmatchable seams (e.g. a hand-edited import): narrate
-      // and stay on the mat rather than swapping in a broken mode.
       console.error('assembly failed to plan', error);
-      assemblyView = null;
-      mountProject(currentProject);
+      // The scene build tore the mat down before failing; restore it. The
+      // model never left 'mat', so there is no transition to unwind.
+      if (!viewport) mountProject(state.project);
       narrate(
         `Cannot assemble this project (${errorMessage(error)}) — the cutting mat is unchanged.`,
         'error',
       );
       return;
     }
-    const nameOf = (id: string): string =>
-      currentProject.pieces.find((p) => p.id === id)?.name ?? id;
-    const labels = assemblyView.plan.steps.map(({ step }) => ({
-      title: `${nameOf(step.pieces[0])} → ${nameOf(step.pieces[1])}`,
-      note: step.note,
-    }));
-    assemblyControls = createAssemblyControls(canvasHolder, {
-      labels,
-      learnCard: starterLearnCard(currentProject),
-      onScrub: (state) => assemblyView?.setScrub(state.stepIndex, state.t),
-      onExit: exitAssembly,
-    });
-    if (assembleButton) assembleButton.disabled = true;
-    // Assembly swaps the mat viewport out — refit has nothing to frame.
+    // Effects: the Assemble button derives from mode, and any mat selection
+    // clears — selection is a mat concept, and the walkthrough shows none.
+    dispatch(enterAssembly(state));
+    const steps = assemblyView?.plan.steps ?? [];
+    narrate(assemblyEntryMessage(steps.length, steps[0]?.step.name));
+    // Assembly swaps the mat viewport out — refit has nothing to frame
+    // (main #16, integrated with the UX-05 state-driven entry).
     refitButtonHandle?.setEnabled(false);
-    narrate(
-      `Assembly — ${labels.length} seam${labels.length === 1 ? '' : 's'} to fold. Scrub through them.`,
-    );
+  }
+
+  /** Leave assembly mode and rebuild the cutting mat. */
+  function exitAssemblyToMat(): void {
+    if (state.mode !== 'assembly') return;
+    dispatch(exitAssembly(state));
+    narrate('Back on the cutting mat.');
   }
 
   // Narration and selection share the status bar: the latest event wins.
   // The tone dresses the pill (error/success) so outcomes read at a glance.
+  // Copy renders through the glossary annotator: terms chip on first use
+  // (UX-07), so narration teaches instead of assuming vocabulary.
   const narrate = (message: string, tone: StatusTone = 'info'): void => {
-    status.textContent = message;
+    statusPopover.close();
+    status.replaceChildren();
+    renderAnnotatedText(status, message, { popover: statusPopover });
     status.classList.remove('error', 'success');
     const className = statusClassName(tone);
     if (className) status.classList.add(className);
   };
 
-  mountProject(startup.project);
-  narrate(startup.message);
+  // Keep the model mirrored with the store the surfaces were told about,
+  // and derive the mat-mode status line from state — the bar can never
+  // contradict the scene. Assembly-mode lines stay event-driven.
+  unsubscribe = selection.subscribe((id) => {
+    state = mirrorSelection(state, id);
+    const text = statusText(state);
+    if (text !== null) narrate(text);
+  });
 
-  // --- Measurements (M2: live parametric redraft) --------------------------
-  // The panel owns input state and the engine owns drafting; this shell
-  // keeps the viewport, piece list, and live project in sync. A failed
-  // draft never reaches the mat — the last valid pieces stay and the
-  // panel surfaces what went wrong (blueprint error state).
-  const measurementsPanel = createMeasurementsPanel(
-    measurementsSection,
-    TITAN_PANTS_TEMPLATE,
-    {
-      onRedraft: (measurements) => {
-        try {
-          // Starter-backed projects redraft their own full piece set (the
-          // pants starter's auxiliaries track the measurements too); any
-          // other project keeps main's behavior — Titan legs replace the
-          // pieces so measurements still drive something real.
-          const pieces =
-            starterById(currentProject.id)?.redraft(measurements) ??
-            redraftPants(measurements);
-          // The redraft edits the live project's pieces, so Save/Export
-          // capture what is on the mat.
-          currentProject = { ...currentProject, pieces };
-          viewport?.updatePieces(pieces);
-          panelHandle?.updatePieces(pieces);
-          measurementsPanel.showDraftError(null);
-        } catch (error) {
-          // Never swallow: surface the failure next to the fields,
-          // keeping the last valid draft on the mat.
-          console.error('redraft failed', error);
-          measurementsPanel.showDraftError(
-            'Could not redraft with those measurements — ' +
-              'the last valid pattern is still shown. Adjust and try again.',
-          );
+  // The one write path into the UI: apply a transition's effects in the
+  // model's canonical order. Handlers stay dumb — they read the new state.
+  const dispatch = (result: TransitionResult): void => {
+    state = result.state;
+    applyAppState(result, {
+      onProjectReplaced: (project) => mountProject(project),
+      onModeChanged: (mode) => {
+        if (assembleButton) assembleButton.disabled = mode === 'assembly';
+        // Exit-to-mat rebuilds the mat; a project replacement mounted it
+        // already.
+        if (mode === 'mat' && !viewport) mountProject(state.project);
+      },
+      onSelectionChanged: (id) => selection.select(id),
+      onPiecesRedrafted: (pieces) => {
+        viewport?.updatePieces(pieces);
+        panelHandle?.updatePieces(pieces);
+        legendHandle?.updatePieces(pieces);
+        if (state.mode === 'assembly') {
+          // The walkthrough's seams are planned from piece geometry; stale
+          // geometry would fold the wrong pattern. Re-plan from the redraft.
+          disposeAssemblyScene();
+          try {
+            buildAssemblyScene();
+            narrate(
+              'Measurements changed — the assembly walkthrough restarted from the redrafted pattern.',
+            );
+          } catch (error) {
+            console.error('assembly failed to plan', error);
+            dispatch(exitAssembly(state));
+            narrate(
+              'The redrafted pattern cannot be assembled — back on the cutting mat.',
+              'error',
+            );
+          }
+        } else {
+          // Refresh the selection line so the bar never carries stale
+          // piece metadata from before the redraft.
+          const text = statusText(state);
+          if (text !== null) narrate(text);
         }
       },
-    },
-  );
+      onFabricApplied: (spec) => {
+        // Fabric follows the live mode: assembly re-skins through the
+        // assembly view, the mat through the viewport.
+        if (assemblyView) assemblyView.applyFabric(spec);
+        else viewport?.applyFabric(spec);
+        // The legend's swatches and summaries ride the same live swap.
+        legendHandle?.updateFabric(spec);
+      },
+    });
+  };
+
+  // Taps on the mat and clicks in the piece list route through the model:
+  // the store is a render channel, the transitions are the only writer.
+  const matSelection: SelectionStore = {
+    get: () => selection.get(),
+    select: (id) => dispatch(selectPiece(state, id)),
+    subscribe: (listener) => selection.subscribe(listener),
+  };
+
+  mountProject(startup.project);
+  narrate(startup.message);
 
   // --- Toolbar (F7: projects as data) -------------------------------------
   const addButton = (label: string, onClick: () => void): HTMLButtonElement => {
@@ -425,7 +576,7 @@ export function mountApp(root: HTMLElement): void {
   };
 
   // Mode entry: the Assemble button hands the stage to the fold walkthrough.
-  assembleButton = addButton('Assemble', enterAssembly);
+  assembleButton = addButton('Assemble', tryEnterAssembly);
 
   // Camera refit: the tap equivalent of the F shortcut. Built once; the
   // mode transitions below decide when it has a viewport to act on.
@@ -436,8 +587,8 @@ export function mountApp(root: HTMLElement): void {
 
   addButton('Save', () => {
     try {
-      saveProject(window.localStorage, currentProject);
-      narrate(`Saved '${currentProject.name}' to this browser.`, 'success');
+      saveProject(window.localStorage, state.project);
+      narrate(`Saved '${state.project.name}' to this browser.`, 'success');
     } catch (error) {
       narrate(`Could not save (${errorMessage(error)}).`, 'error');
     }
@@ -446,7 +597,7 @@ export function mountApp(root: HTMLElement): void {
   addButton('Load', () => {
     const saved = loadProject(window.localStorage);
     if (saved.status === 'found') {
-      mountProject(saved.project);
+      dispatch(switchProject(state, saved.project));
       narrate(`Loaded '${saved.project.name}' from this browser.`, 'success');
     } else if (saved.status === 'empty') {
       narrate('Nothing saved yet — press Save first.');
@@ -457,7 +608,7 @@ export function mountApp(root: HTMLElement): void {
 
   addButton('Share', () => {
     const plan = planShare(
-      currentProject,
+      state.project,
       window.location.origin + window.location.pathname,
     );
     void (async () => {
@@ -465,7 +616,7 @@ export function mountApp(root: HTMLElement): void {
         const copied = await copyTextToClipboard(plan.url);
         narrate(
           copied
-            ? `Share link copied (${plan.urlLength} characters) — opening it loads '${currentProject.name}'.`
+            ? `Share link copied (${plan.urlLength} characters) — opening it loads '${state.project.name}'.`
             : 'Could not reach the clipboard — use Export JSON to share this project instead.',
           copied ? 'success' : 'error',
         );
@@ -485,11 +636,11 @@ export function mountApp(root: HTMLElement): void {
   addButton('Export JSON', () => {
     try {
       downloadTextFile(
-        `${slugify(currentProject.name)}.pattern.json`,
-        serializeProject(currentProject),
+        `${slugify(state.project.name)}.pattern.json`,
+        serializeProject(state.project),
         'application/json',
       );
-      narrate(`Exported '${currentProject.name}' as JSON.`);
+      narrate(`Exported '${state.project.name}' as JSON.`);
     } catch (error) {
       narrate(`Export failed (${errorMessage(error)}).`);
     }
@@ -498,8 +649,8 @@ export function mountApp(root: HTMLElement): void {
   addButton('Export SVG', () => {
     try {
       downloadTextFile(
-        `${slugify(currentProject.name)}.pattern.svg`,
-        exportPiecesSvg(currentProject),
+        `${slugify(state.project.name)}.pattern.svg`,
+        exportPiecesSvg(state.project),
         'image/svg+xml',
       );
       narrate("Exported SVG — print at 100% scale (no 'fit to page').");
@@ -521,7 +672,7 @@ export function mountApp(root: HTMLElement): void {
           narrate(`Import failed: ${parsed.reason}`);
           return;
         }
-        mountProject(parsed.project);
+        dispatch(switchProject(state, parsed.project));
         narrate(`Imported '${parsed.project.name}'.`);
       } catch (error) {
         narrate(`Import failed (${errorMessage(error)}).`);
@@ -563,11 +714,11 @@ export function mountApp(root: HTMLElement): void {
         viewport?.refit();
         break;
       case 'assemble':
-        if (!assemblyView) enterAssembly();
+        tryEnterAssembly();
         break;
       case 'exit-or-deselect':
-        if (assemblyView) exitAssembly();
-        else selection.select(null);
+        if (state.mode === 'assembly') exitAssemblyToMat();
+        else dispatch(selectPiece(state, null));
         break;
       case 'show-shortcuts':
         narrate(shortcutHint());
@@ -578,10 +729,12 @@ export function mountApp(root: HTMLElement): void {
   window.addEventListener('pagehide', () => {
     unsubscribe?.();
     fabricHandle?.dispose();
-    measurementsPanel.dispose();
+    measurementsHandle?.dispose();
     panelHandle?.dispose();
-    teardownAssemblyMode();
+    legendHandle?.dispose();
+    disposeAssemblyScene();
     viewport?.dispose();
     viewport = null;
+    statusPopover.dispose();
   });
 }

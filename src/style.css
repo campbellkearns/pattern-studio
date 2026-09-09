@@ -1,31 +1,47 @@
 /*
- * Pattern Studio — premium presentation pass (blueprint "polish bar").
- * The atelier precedents (thread-and-mesh, mini-jersey-studio) share one
- * recipe: a dark matte stage, generous whitespace, restrained type with a
- * serif voice for titles and letterspaced eyebrows for structure. Motion is
- * reserved for mode changes — a canvas swap is an event, so it arrives with
- * a settle, not a flash.
+ * Pattern Studio — five-token design system (UX-06, UD1 'clean technical
+ * precision'). Every color on the shell, panels, toolbar, and statuses is
+ * one of the five tokens below (verbatim), a same-hue lightness variant
+ * the PRD's WCAG path allows (documented per-variant), or one of two
+ * documented neutrals (near-black body ink, paper white) for readability.
+ * The WebGL scenes read the same values from src/tokens.ts.
  */
 
 :root {
-  --bg: #171b1f;
-  --surface: #21262c;
-  --surface-raised: #2a313a;
-  --surface-hover: #313a45;
-  --line: #3a434d;
-  --line-soft: color-mix(in srgb, var(--line) 55%, transparent);
-  --ink: #e9eef3;
-  --ink-dim: #9aa8b5;
-  --ink-faint: #6d7a87;
-  --accent: #ffd166;
-  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
-  --danger: #e5484d;
-  --success: #5bb98c;
+  /* The five tokens, verbatim. */
+  --cobalt: #1A40B0; /* brand header, primary buttons, major contours */
+  --tint: #E8EEF9; /* drafting workspace, cool technical atmosphere */
+  --mat-green: #105B43; /* status badges, verified measurements, seams */
+  --amber: #F59E0B; /* warning flags, notch highlights, balance alerts */
+  --azure: #94AEDB; /* technical grid lines, bounding boxes, dividers */
+
+  /* Documented neutrals for body-text readability. */
+  --ink: #1B1E24; /* near-black body text: 14.33:1 on Tint, 16.70:1 on paper */
+  --paper: #ffffff; /* card surface; text color on cobalt/mat-green fills */
+
+  /* Same-hue AA-derived variants (UD1 lightness path — measured in PR). */
+  --amber-ink: #6B4400; /* amber for text/thin state borders: 7.35:1 on Tint */
+  --azure-line: #4F6C9E; /* azure for component borders: 5.29:1 on paper */
+
+  /* Semantic roles (no new hues). */
+  --bg: var(--tint);
+  --surface: var(--paper);
+  --surface-hover: color-mix(in srgb, var(--tint) 55%, var(--paper));
+  --line: var(--azure); /* decorative separators and workspace grid */
+  --line-soft: color-mix(in srgb, var(--azure) 55%, transparent);
+  --line-strong: var(--azure-line); /* component boundaries (WCAG 1.4.11) */
+  --ink-dim: color-mix(in srgb, var(--ink) 70%, var(--paper));
+  --primary: var(--cobalt);
+  --on-primary: var(--paper);
+  --primary-soft: color-mix(in srgb, var(--cobalt) 10%, var(--paper));
+  --warning: var(--amber);
+  --warning-ink: var(--amber-ink);
+  --success: var(--mat-green);
   --radius-s: 8px;
   --radius-m: 10px;
   --radius-l: 14px;
-  --shadow-panel: 0 1px 0 color-mix(in srgb, #ffffff 4%, transparent) inset;
-  --shadow-pop: 0 12px 32px rgb(0 0 0 / 0.35);
+  --shadow-panel: 0 1px 2px rgb(16 24 40 / 0.08);
+  --shadow-pop: 0 12px 32px rgb(16 24 40 / 0.18);
   --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
   font-family:
     'Avenir Next',
@@ -33,7 +49,7 @@
     system-ui,
     -apple-system,
     sans-serif;
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 * {
@@ -70,6 +86,7 @@ body {
 }
 
 /* --- Toolbar (F7: projects as data) -------------------------------------- */
+/* Brand header: the cobalt title block of a drafting sheet. */
 
 .toolbar {
   display: flex;
@@ -78,25 +95,24 @@ body {
   gap: 12px;
   flex-wrap: wrap;
   padding: 12px 20px;
-  background: linear-gradient(to bottom, var(--surface-raised), var(--surface));
-  border-bottom: 1px solid var(--line);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.25);
+  background: var(--primary);
+  box-shadow: var(--shadow-panel);
   z-index: 1;
 }
 
 .project-title {
   margin: 0;
-  font-family: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
   font-size: 1.2rem;
   font-weight: 500;
   letter-spacing: 0.01em;
+  color: var(--on-primary);
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* Atelier wordmark: the studio owns the eyebrow, the project the title. */
+/* Studio wordmark: the studio owns the eyebrow, the project the title. */
 .project-title::before {
   content: 'Pattern Studio';
   display: block;
@@ -104,7 +120,7 @@ body {
   font-weight: 600;
   letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--on-primary);
   margin-bottom: 2px;
 }
 
@@ -122,49 +138,54 @@ button {
     box-shadow 150ms var(--ease);
 }
 
-button:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-
 button:active:not(:disabled) {
   transform: translateY(1px);
 }
 
+/* Toolbar controls are title-block cells: paper fill, cobalt text. */
 .toolbar-btn {
   min-width: 44px;
   min-height: 44px;
   padding: 0 16px;
-  border: 1px solid var(--line);
+  border: 1px solid color-mix(in srgb, var(--paper) 40%, transparent);
   border-radius: var(--radius-m);
-  background: var(--surface-raised);
-  color: var(--ink);
+  background: var(--paper);
+  color: var(--primary);
   font: inherit;
   font-size: 0.85rem;
   letter-spacing: 0.02em;
   cursor: pointer;
 }
 
-.toolbar-btn:active {
-  border-color: var(--accent);
+.toolbar-btn:hover:not(:disabled) {
+  border-color: var(--paper);
 }
 
-/* Starter picker: same visual language as the toolbar buttons, with the
-   accent edge that marks it as the way lessons arrive. */
+.toolbar-btn:focus-visible {
+  outline: 2px solid var(--paper);
+  outline-offset: 1px;
+}
+
+/* Starter picker: same title-block language as the toolbar buttons. */
 .starter-picker {
   min-height: 44px;
   padding: 0 12px;
-  border: 1px solid var(--line);
+  border: 1px solid color-mix(in srgb, var(--paper) 40%, transparent);
   border-radius: var(--radius-m);
-  background: var(--surface-raised);
-  color: var(--ink);
+  background: var(--paper);
+  color: var(--primary);
   font: inherit;
   font-size: 0.85rem;
   cursor: pointer;
 }
 
+.starter-picker:hover:not(:disabled) {
+  border-color: var(--paper);
+}
+
 .starter-picker:focus-visible {
-  border-color: var(--accent);
-  outline: none;
+  outline: 2px solid var(--paper);
+  outline-offset: 1px;
 }
 
 /* --- Viewport ---------------------------------------------------------- */
@@ -173,13 +194,18 @@ button:active:not(:disabled) {
   flex: 1;
   min-width: 0;
   position: relative;
-  /* Non-DOM-safe stagecraft: a matte vignette behind the canvas so the mat
-     reads as lit from above. Pure CSS — the model never knows. */
+  /* The drafting table: a faint azure technical grid on the tint. Pure
+     CSS decoration — the canvas paints over it once mounted. */
   background:
-    radial-gradient(
-      120% 90% at 50% 8%,
-      color-mix(in srgb, #3d4a5c 32%, transparent),
-      transparent 62%
+    repeating-linear-gradient(
+      to right,
+      color-mix(in srgb, var(--azure) 22%, transparent) 0 1px,
+      transparent 1px 48px
+    ),
+    repeating-linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--azure) 22%, transparent) 0 1px,
+      transparent 1px 48px
     ),
     var(--bg);
 }
@@ -247,17 +273,17 @@ button:active:not(:disabled) {
   min-width: 44px;
   min-height: 44px;
   padding: 0 12px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-m);
-  background: var(--surface-raised);
+  background: var(--surface);
   color: var(--ink);
   font: inherit;
   font-size: 0.85rem;
   cursor: pointer;
 }
 
-.preset-btn:active {
-  border-color: var(--accent);
+.preset-btn:hover:not(:disabled) {
+  border-color: var(--primary);
 }
 
 .piece-list {
@@ -289,9 +315,9 @@ button:active:not(:disabled) {
   align-items: flex-start;
   gap: 2px;
   padding: 10px 14px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-m);
-  background: var(--surface-raised);
+  background: var(--surface);
   color: var(--ink);
   font: inherit;
   text-align: left;
@@ -302,10 +328,12 @@ button:active:not(:disabled) {
   background: var(--surface-hover);
 }
 
+/* Committed choice: solid cobalt, the primary button treatment. */
 .piece-btn.selected {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface-raised));
-  box-shadow: 0 0 0 1px var(--accent) inset;
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--on-primary);
+  box-shadow: 0 0 0 1px var(--primary) inset;
 }
 
 .piece-name {
@@ -318,11 +346,15 @@ button:active:not(:disabled) {
   font-variant-numeric: tabular-nums;
 }
 
+.piece-btn.selected .piece-meta {
+  color: color-mix(in srgb, var(--on-primary) 80%, var(--primary));
+}
+
 /* Off-happy-path: a project with zero pieces says so instead of a blank. */
 .panel-empty {
   margin: 0;
   padding: 14px;
-  border: 1px dashed var(--line);
+  border: 1px dashed var(--line-strong);
   border-radius: var(--radius-m);
   color: var(--ink-dim);
   font-size: 0.85rem;
@@ -330,6 +362,20 @@ button:active:not(:disabled) {
 }
 
 .panel-empty[hidden] {
+  display: none;
+}
+
+/* UX-07: the panel names the seams the walkthrough will fold, so the build
+ * order is legible before Assemble. Sits right under the piece list. */
+.panel-seams {
+  margin: 0;
+  padding: 0 14px 12px;
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.panel-seams[hidden] {
   display: none;
 }
 
@@ -358,33 +404,147 @@ button:active:not(:disabled) {
   min-width: 44px;
   min-height: 44px;
   padding: 0 12px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-m);
-  background: var(--surface-raised);
+  background: var(--surface);
   color: var(--ink);
   font: inherit;
   font-size: 0.85rem;
   cursor: pointer;
 }
 
-.fabric-btn:active {
-  border-color: var(--accent);
+.fabric-btn:hover:not(:disabled) {
+  border-color: var(--primary);
 }
 
 .fabric-btn.selected {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface-raised));
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--on-primary);
 }
 
 .fabric-color {
   width: 64px;
   height: 44px;
   padding: 4px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-m);
-  background: var(--surface-raised);
+  background: var(--surface);
   cursor: pointer;
 }
+
+/* --- Materials legend (UX-02) ---------------------------------------------
+   Overlay card on the cutting mat: every piece identifiable by name and
+   fabric without tapping. Floating over the viewport it describes, in the
+   same translucent-paper language as the assembly bar; entries are 44 px
+   touch targets, and focus mirrors hover so the linkage is keyboard-reachable. */
+
+.materials-legend {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  max-width: min(280px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-m);
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow-pop);
+  /* Enters with the mat it annotates (same settle language as the bar). */
+  animation: bar-rise 320ms var(--ease) both;
+}
+
+.materials-legend[hidden] {
+  display: none;
+}
+
+.materials-legend h2 {
+  margin: 0 0 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.legend-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.legend-entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Transient attention, from either side: the pointer on the entry, or a
+   scene hover arriving through the shell's hover channel. */
+.legend-entry:hover:not(.selected),
+.legend-entry.hover:not(.selected) {
+  background: var(--surface-hover);
+  border-color: var(--primary);
+}
+
+.legend-entry:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* Committed choice: solid cobalt, matching the piece panel. */
+.legend-entry.selected {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--on-primary);
+  box-shadow: 0 0 0 1px var(--primary) inset;
+}
+
+.legend-swatch {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+}
+
+.legend-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.legend-name {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.legend-fabric {
+  color: var(--ink-dim);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.legend-entry.selected .legend-fabric {
+  color: color-mix(in srgb, var(--on-primary) 80%, var(--primary));
+}
+
 
 /* --- Status bar ---------------------------------------------------------- */
 
@@ -395,11 +555,12 @@ button:active:not(:disabled) {
   transform: translateX(-50%);
   max-width: min(90vw, 560px);
   padding: 10px 20px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  background: color-mix(in srgb, var(--paper) 92%, transparent);
   backdrop-filter: blur(8px);
   box-shadow: var(--shadow-pop);
+  color: var(--ink);
   font-size: 0.85rem;
   white-space: nowrap;
   overflow: hidden;
@@ -410,11 +571,13 @@ button:active:not(:disabled) {
 
 /* Off-happy-path tones: the pill tells you how it went before you read it. */
 .status-bar.error {
-  border-color: color-mix(in srgb, var(--danger) 65%, transparent);
+  border-color: var(--warning-ink);
+  color: var(--warning-ink);
 }
 
 .status-bar.success {
-  border-color: color-mix(in srgb, var(--success) 55%, transparent);
+  border-color: var(--success);
+  color: var(--success);
 }
 
 /* --- Unsupported devices -------------------------------------------------- */
@@ -432,9 +595,9 @@ button:active:not(:disabled) {
 
 .unsupported h2 {
   margin: 0;
-  font-family: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
   font-weight: 500;
   letter-spacing: 0.01em;
+  color: var(--ink);
 }
 
 .unsupported p {
@@ -478,6 +641,20 @@ button:active:not(:disabled) {
   line-height: 1.45;
 }
 
+/* UX-03 empty state: this project declares no adjustable parameters. Same
+   narrative voice as the status bar (explain why + next action), but
+   persistent — the bar's latest-event-wins rule would bury it under the
+   starter's learn card within one tick. */
+.measurements-empty {
+  margin: 0;
+  padding: 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-s);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--ink-dim);
+}
+
 .measurement-fields {
   display: flex;
   flex-direction: column;
@@ -510,9 +687,9 @@ button:active:not(:disabled) {
   grid-area: input;
   min-height: 44px;
   padding: 0 8px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-s);
-  background: var(--surface-raised);
+  background: var(--surface);
   color: var(--ink);
   font: inherit;
   font-size: 0.9rem;
@@ -521,15 +698,17 @@ button:active:not(:disabled) {
 }
 
 .measurement-field input:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--primary);
   outline-offset: 1px;
 }
 
 /* Off-happy-path: a field mid-edit or holding junk is flagged, and the
-   last valid draft stays on the mat until the value recovers. */
+   last valid draft stays on the mat until the value recovers. The amber
+   token darkened within its hue (--warning-ink) clears 3:1 as a state
+   indicator; raw #F59E0B cannot (2.15:1 on paper). */
 .measurement-field.invalid input,
 .measurement-field input[aria-invalid='true'] {
-  border-color: var(--danger);
+  border-color: var(--warning-ink);
 }
 
 .measurement-explainer {
@@ -548,28 +727,29 @@ button:active:not(:disabled) {
 .reset-btn {
   min-height: 44px;
   padding: 0 16px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-m);
-  background: var(--surface-raised);
+  background: var(--surface);
   color: var(--ink);
   font: inherit;
   font-size: 0.85rem;
   cursor: pointer;
 }
 
-.reset-btn:hover {
-  border-color: var(--accent);
+.reset-btn:hover:not(:disabled) {
+  border-color: var(--primary);
 }
 
+/* Warning flag: amber wash beneath, amber-ink border and text for AA. */
 .draft-error {
   margin: 10px 0 0;
   padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--danger) 65%, transparent);
+  border: 1px solid var(--warning-ink);
   border-radius: var(--radius-s);
-  background: color-mix(in srgb, var(--danger) 9%, transparent);
+  background: color-mix(in srgb, var(--amber) 12%, var(--paper));
   font-size: 0.8rem;
   line-height: 1.4;
-  color: #f2a0a3;
+  color: var(--warning-ink);
 }
 
 .draft-error[hidden] {
@@ -589,9 +769,9 @@ button:active:not(:disabled) {
   flex-direction: column;
   gap: 8px;
   padding: 14px 16px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-l);
-  background: color-mix(in srgb, var(--surface-raised) 88%, transparent);
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
   backdrop-filter: blur(8px);
   box-shadow: var(--shadow-pop);
   /* Entering assembly is a mode change: the bar rises to meet the scene. */
@@ -627,14 +807,14 @@ button:active:not(:disabled) {
   margin: 0;
   font-size: 0.85rem;
   line-height: 1.45;
-  color: var(--ink-soft, #97a4b1);
+  color: var(--ink-dim);
 }
 
 .assembly-scrubber {
   width: 100%;
   height: 44px; /* thumb-sized touch target, not a hairline track */
   margin: 0;
-  accent-color: var(--accent);
+  accent-color: var(--primary);
   touch-action: none;
 }
 
@@ -647,9 +827,9 @@ button:active:not(:disabled) {
   flex: 1;
   min-height: 44px;
   padding: 0 14px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-m);
-  background: var(--surface-raised);
+  background: var(--surface);
   color: var(--ink);
   font: inherit;
   font-size: 0.85rem;
@@ -662,7 +842,7 @@ button:active:not(:disabled) {
 }
 
 .assembly-btn:active:not(:disabled) {
-  border-color: var(--accent);
+  border-color: var(--primary);
 }
 
 .assembly-exit {
@@ -670,13 +850,95 @@ button:active:not(:disabled) {
   min-width: 120px;
 }
 
+/* The lesson card rides a cobalt wash; body ink keeps it readable. */
 .assembly-learn-card {
   margin: 0;
   padding: 10px 12px;
   border-radius: var(--radius-s);
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface-raised));
+  background: var(--primary-soft);
   color: var(--ink);
   font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+/* --- Glossary (UX-07): inline term chips + definition popover --------------- */
+
+/* The ⓘ chip is a button styled like inline text — it lives in the status
+ * bar, assembly notes, learn card, and piece meta, so it must read as copy
+ * first and an affordance second. Cobalt on the soft wash carries the
+ * “learnable” affordance; ink-free hover uses the same cobalt fill. */
+.term-chip {
+  display: inline-flex;
+  align-items: baseline;
+  padding: 0 7px;
+  margin: 0 1px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font: inherit;
+  font-size: 0.88em;
+  line-height: 1.4;
+  cursor: help;
+  vertical-align: baseline;
+}
+
+.term-chip:hover,
+.term-chip:focus-visible,
+.term-chip[aria-expanded='true'] {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+}
+
+/* Fixed-positioned against the viewport (anchored by glossaryDom.ts to the
+ * chip's screen rect), so one card serves every surface. */
+.glossary-popover {
+  position: fixed;
+  z-index: 60;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  max-width: min(340px, calc(100vw - 2 * var(--radius-m)));
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+}
+
+.glossary-popover[hidden] {
+  display: none;
+}
+
+.glossary-popover-term {
+  color: var(--primary);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.glossary-popover-close {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.glossary-popover-close:hover,
+.glossary-popover-close:focus-visible {
+  color: var(--ink);
+}
+
+.glossary-popover-definition {
+  grid-column: 1;
+  color: var(--ink);
+  font-size: 0.85rem;
   line-height: 1.45;
 }
 
@@ -685,6 +947,7 @@ button:active:not(:disabled) {
 @media (prefers-reduced-motion: reduce) {
   .viewport-canvas,
   .piece-list,
+  .materials-legend,
   .assembly-bar {
     animation: none;
   }

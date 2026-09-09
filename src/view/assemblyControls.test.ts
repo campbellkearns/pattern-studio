@@ -2,7 +2,9 @@
  * Assembly-controls interaction contract, unit-tested in jsdom: the slider
  * is the single source of truth, the step buttons move one seam at a time,
  * labels narrate the current seam, and the learn card appears only when
- * every fold is complete.
+ * every fold is complete. UX-01: button steps TWEEN the value to the target
+ * boundary (spec easing and durations), so these tests pump a manual frame
+ * scheduler — clicks start a glide, advance() plays it deterministically.
  */
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -10,12 +12,41 @@ import {
   scrubStateFromValue,
 } from './assemblyControls';
 import type { AssemblyScrubState } from './assemblyControls';
+import type { FrameScheduler } from './walkthroughMotion';
+import { FOLD_MS } from './walkthroughMotion';
 
-function mount(stepCount = 2) {
+/** Deterministic frame clock: 16 ms frames, advanced in steps to a target. */
+function createTestScheduler() {
+  let clockMs = 0;
+  const pending = new Set<(nowMs: number) => void>();
+  const scheduler: FrameScheduler = {
+    nowMs: () => clockMs,
+    nextFrame: (callback) => {
+      pending.add(callback);
+    },
+  };
+  const advance = (ms: number): void => {
+    const target = clockMs + ms;
+    while (clockMs < target) {
+      clockMs = Math.min(target, clockMs + 16);
+      const callbacks = [...pending];
+      pending.clear();
+      for (const callback of callbacks) callback(clockMs);
+    }
+  };
+  return { scheduler, advance };
+}
+
+function mount(
+  stepCount = 2,
+  options: { reducedMotion?: boolean; durationMs?: number } = {},
+) {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const states: AssemblyScrubState[] = [];
+  const stepsBegun: Array<{ stepIndex: number; forward: boolean }> = [];
   const onExit = vi.fn();
+  const clock = createTestScheduler();
   const handle = createAssemblyControls(container, {
     labels: Array.from({ length: stepCount }, (_, i) => ({
       title: `Seam ${i + 1} title`,
@@ -24,6 +55,14 @@ function mount(stepCount = 2) {
     learnCard: 'You assembled it!',
     onScrub: (state) => states.push(state),
     onExit,
+    scheduler: clock.scheduler,
+    reducedMotion: () => options.reducedMotion ?? false,
+    stepDurationMs: options.durationMs
+      ? () => options.durationMs!
+      : (_stepIndex, forward) =>
+          forward ? FOLD_MS.straightForward : FOLD_MS.straightReverse,
+    onStepBegin: (stepIndex, forward) =>
+      stepsBegun.push({ stepIndex, forward }),
   });
   const slider = container.querySelector(
     '.assembly-scrubber',
@@ -54,6 +93,8 @@ function mount(stepCount = 2) {
     exit,
     onExit,
     states,
+    stepsBegun,
+    clock,
   };
 }
 
@@ -77,12 +118,16 @@ describe('scrubStateFromValue', () => {
   });
 });
 
+/** Text as the learner reads it: the ⓘ affordance stripped, gaps collapsed. */
+const visibleText = (el: HTMLElement): string =>
+  el.textContent!.replaceAll('ⓘ', '').replace(/\s+/g, ' ');
+
 describe('assembly controls', () => {
   it('renders the first seam label on mount and emits its state', () => {
     const ui = mount();
-    expect(ui.counter.textContent).toContain('Seam 1 of 2');
-    expect(ui.counter.textContent).toContain('Seam 1 title');
-    expect(ui.note.textContent).toBe('Seam 1 note');
+    expect(visibleText(ui.counter)).toContain('Seam 1 of 2');
+    expect(visibleText(ui.counter)).toContain('Seam 1 title');
+    expect(visibleText(ui.note)).toBe('Seam 1 note');
     expect(ui.states[0]).toEqual({ stepIndex: 0, t: 0 });
     expect(ui.prev.disabled).toBe(true);
   });
@@ -96,26 +141,117 @@ describe('assembly controls', () => {
     expect(ui.learnCard.hidden).toBe(true);
   });
 
-  it('steps forward one seam at a time', () => {
+  it('steps forward one seam at a time, tweening through the fold', () => {
     const ui = mount();
     ui.next.click();
+    // Mid-tween the fold is in progress (eased quarter: 4·(0.25)³ = 0.0625).
+    ui.clock.advance(FOLD_MS.straightForward / 4);
+    expect(ui.handle.state).toEqual({ stepIndex: 0, t: 0.0625 });
+    expect(visibleText(ui.counter)).toContain('Seam 1 of 2');
+    ui.clock.advance(FOLD_MS.straightForward);
     expect(ui.handle.state).toEqual({ stepIndex: 1, t: 0 });
-    expect(ui.counter.textContent).toContain('Seam 2 of 2');
+    expect(visibleText(ui.counter)).toContain('Seam 2 of 2');
     ui.next.click();
+    ui.clock.advance(FOLD_MS.straightForward);
     expect(ui.handle.state).toEqual({ stepIndex: 1, t: 1 });
     expect(ui.next.disabled).toBe(true);
   });
 
-  it('steps backward one seam at a time', () => {
+  it('steps backward one seam at a time, retracing the fold in reverse', () => {
     const ui = mount();
     ui.handle.setValue(2);
     ui.prev.click();
-    // Un-folding the last seam lands on its start (visually identical to
-    // seam 1 folded, seam 2 open).
+    // Mid-unfold: the same eased curve mirrored.
+    ui.clock.advance(FOLD_MS.straightReverse / 2);
+    expect(ui.handle.state.stepIndex).toBe(1);
+    expect(ui.handle.state.t).toBeCloseTo(0.5, 9);
+    ui.clock.advance(FOLD_MS.straightReverse);
+    // Landed on the last seam's start (visually identical to seam 1 folded,
+    // seam 2 open).
+    expect(ui.handle.state).toEqual({ stepIndex: 1, t: 0 });
+    ui.prev.click();
+    ui.clock.advance(FOLD_MS.straightReverse);
+    expect(ui.handle.state).toEqual({ stepIndex: 0, t: 0 });
+    expect(ui.prev.disabled).toBe(true);
+  });
+
+  it('reversal retraces the forward path (Prev undoes Next exactly)', () => {
+    // With reverse duration pinned to the forward duration, unfolding the
+    // same seam must retrace the folded value path exactly, mirrored.
+    const ui = mount(2, { durationMs: 700 });
+    const valueOf = (state: AssemblyScrubState): number =>
+      state.stepIndex + state.t;
+    // Fold seam 1 forward, sampling the value through the tween.
+    const forward: number[] = [];
+    ui.next.click();
+    for (let i = 0; i < 14; i++) {
+      ui.clock.advance(50);
+      forward.push(valueOf(ui.handle.state));
+    }
+    expect(forward[forward.length - 1]).toBe(1);
+    // Un-fold the same seam again: from v=1, Prev tweens back to v=0.
+    const reverse: number[] = [];
+    ui.prev.click();
+    for (let i = 0; i < 14; i++) {
+      ui.clock.advance(50);
+      reverse.push(valueOf(ui.handle.state));
+    }
+    expect(reverse[reverse.length - 1]).toBe(0);
+    // Mirror: reverse[k] === 1 - forward[k] for every sample.
+    for (let k = 0; k < forward.length; k++) {
+      expect(reverse[k]).toBeCloseTo(1 - forward[k]!, 9);
+    }
+    // And the traversal stays within the one boundary being crossed.
+    expect(forward.every((v) => v > 0 && v <= 1)).toBe(true);
+    expect(reverse.every((v) => v >= 0 && v < 1)).toBe(true);
+  });
+
+  it('a mid-tween click retargets from the current value (no queuing)', () => {
+    const ui = mount();
+    ui.next.click();
+    ui.clock.advance(FOLD_MS.straightForward / 2);
+    ui.next.click(); // mid-fold: retargets to finish THIS fold (v → 1)
+    ui.clock.advance(FOLD_MS.straightForward * 2);
+    expect(ui.handle.state).toEqual({ stepIndex: 1, t: 0 });
+    expect(ui.slider.value).toBe('1');
+    // A third click from the landed boundary moves to the next one.
+    ui.next.click();
+    ui.clock.advance(FOLD_MS.straightForward);
+    expect(ui.handle.state).toEqual({ stepIndex: 1, t: 1 });
+  });
+
+  it('a manual scrub cancels the in-flight tween', () => {
+    const ui = mount();
+    ui.next.click();
+    ui.clock.advance(FOLD_MS.straightForward / 4);
+    ui.slider.value = '0.2';
+    ui.slider.dispatchEvent(new Event('input'));
+    ui.clock.advance(FOLD_MS.straightForward * 2);
+    expect(ui.handle.state).toEqual({ stepIndex: 0, t: 0.2 });
+  });
+
+  it('reduced motion lands instantly on the legible boundary frame', () => {
+    const ui = mount(2, { reducedMotion: true });
+    ui.next.click();
+    // No frames pumped: the step has already landed, no mid-fold limbo.
     expect(ui.handle.state).toEqual({ stepIndex: 1, t: 0 });
     ui.prev.click();
     expect(ui.handle.state).toEqual({ stepIndex: 0, t: 0 });
-    expect(ui.prev.disabled).toBe(true);
+  });
+
+  it('announces each step begin with the seam about to fold', () => {
+    const ui = mount();
+    ui.next.click(); // folds seam 0 (0 → 1)
+    ui.clock.advance(FOLD_MS.straightForward);
+    ui.next.click(); // folds seam 1 (1 → 2)
+    ui.clock.advance(FOLD_MS.straightForward);
+    ui.prev.click(); // un-folds seam 1 (2 → 1)
+    ui.clock.advance(FOLD_MS.straightReverse);
+    expect(ui.stepsBegun).toEqual([
+      { stepIndex: 0, forward: true },
+      { stepIndex: 1, forward: true },
+      { stepIndex: 1, forward: false },
+    ]);
   });
 
   it('shows the learn card only when every fold is complete', () => {
@@ -133,7 +269,24 @@ describe('assembly controls', () => {
     const ui = mount();
     ui.handle.setValue(0.5);
     ui.next.click();
+    ui.clock.advance(FOLD_MS.straightForward);
     expect(ui.handle.state).toEqual({ stepIndex: 1, t: 0 });
+  });
+
+  it('a click on a disabled boundary is a no-op (no tween)', () => {
+    const ui = mount();
+    ui.prev.click();
+    ui.clock.advance(1000);
+    expect(ui.handle.state).toEqual({ stepIndex: 0, t: 0 });
+    expect(ui.stepsBegun).toEqual([]);
+  });
+
+  it('dispose stops the tween without throwing', () => {
+    const ui = mount();
+    ui.next.click();
+    ui.handle.dispose();
+    expect(() => ui.clock.advance(1000)).not.toThrow();
+    expect(ui.states.length).toBeGreaterThan(0);
   });
 
   it('exit reports once and dispose removes the bar', () => {
@@ -157,5 +310,90 @@ describe('assembly controls', () => {
       'Fold progress scrubber',
     );
     expect(ui.slider.getAttribute('aria-valuemax')).toBe('2');
+  });
+});
+
+describe('vocabulary layer (UX-07): terms chip where the user is looking', () => {
+  /** Mount with real-shape jargon copy so the chip surfaces are exercised. */
+  function mountGlossary(reducedMotion = true) {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const clock = createTestScheduler();
+    const handle = createAssemblyControls(container, {
+      labels: [
+        {
+          title: 'Rise seam: Front → Back',
+          note: 'Stay-stitch both crotch curves — ease the front gently.',
+        },
+        { title: 'Flap → Outer cover', note: 'Sew the flap to the cover.' },
+      ],
+      learnCard: 'Press the side seams flat to finish.',
+      onScrub: () => {},
+      onExit: () => {},
+      scheduler: clock.scheduler,
+      reducedMotion: () => reducedMotion,
+    });
+    const counter = container.querySelector(
+      '.assembly-counter',
+    ) as HTMLElement;
+    const note = container.querySelector('.assembly-note') as HTMLElement;
+    const learnCard = container.querySelector(
+      '.assembly-learn-card',
+    ) as HTMLElement;
+    const chips = (el: HTMLElement): HTMLButtonElement[] =>
+      [...el.querySelectorAll<HTMLButtonElement>('.term-chip')];
+    // The controls' popover is the last element it appended to the body.
+    const card = document.body.lastElementChild as HTMLElement;
+    return { container, handle, clock, counter, note, learnCard, chips, card };
+  }
+
+  it('chips sewing terms in the counter and step note, copy intact', () => {
+    const ui = mountGlossary();
+    expect(visibleText(ui.counter)).toContain('Rise seam');
+    expect(
+      ui.chips(ui.counter).map((c) => c.getAttribute('aria-label')),
+    ).toEqual(['What does “seam” mean?', 'What does “rise” mean?']);
+    expect(ui.chips(ui.note).map((c) => c.getAttribute('aria-label'))).toEqual([
+      'What does “stay-stitch” mean?',
+      'What does “ease” mean?',
+    ]);
+    expect(visibleText(ui.note)).toContain(
+      'Stay-stitch both crotch curves — ease the front gently.',
+    );
+    ui.handle.dispose();
+    ui.container.remove();
+  });
+
+  it('opens the definition from a step note chip', () => {
+    const ui = mountGlossary();
+    ui.chips(ui.note)[0]!.click();
+    expect(ui.card.hidden).toBe(false);
+    expect(ui.card.querySelector('.glossary-popover-term')?.textContent).toBe(
+      'stay-stitch',
+    );
+    ui.handle.dispose();
+    ui.container.remove();
+  });
+
+  it('rebuilds the chips when the step changes (fresh first-use per step)', () => {
+    const ui = mountGlossary();
+    ui.handle.setValue(1);
+    expect(ui.counter.textContent).toContain('Flap → Outer cover');
+    // The second step's counter chips "seam" again: each step's copy is
+    // annotated on its own first use, and "Flap → Outer cover" has no terms.
+    expect(
+      ui.chips(ui.counter).map((c) => c.getAttribute('aria-label')),
+    ).toEqual(['What does “seam” mean?']);
+    ui.handle.dispose();
+    ui.container.remove();
+  });
+
+  it('does not churn chip DOM on tween frames within a step', () => {
+    const ui = mountGlossary(false);
+    const chipBefore = ui.chips(ui.counter)[0];
+    ui.handle.setValue(0.5); // mid-seam frame: same label, same chips
+    expect(ui.chips(ui.counter)[0]).toBe(chipBefore);
+    ui.handle.dispose();
+    ui.container.remove();
   });
 });

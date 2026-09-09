@@ -6,16 +6,18 @@
  * The legs come straight from the Titan adapter — the same redraft the
  * measurements panel drives — so the front and back always track real drafts.
  * The waistband, fly shield, and pocket bag are hand-authored cm-space vector
- * pieces sized from PantMeasurements (not from the draft outlines): their
- * formulas reproduce the template-draft relationships almost exactly (the
- * front's waist edge measures the eased waist quarter; the front's fly edge
- * measures ≈ 0.46 × fork depth) and stay valid across the panel's whole
- * range, where Titan's outline topology itself changes shape.
+ * pieces sized from the legs' MEASURED seam edges (not from formulas over the
+ * measurements): the shield's attach edge is the front's measured fly edge,
+ * the band's quarters are the measured waist edges, and the pocket mouth
+ * scales with the front's waist. Sizing from the draft is what keeps every
+ * seam-step chain pair matched across the panel's whole range, where Titan's
+ * outline topology itself changes shape.
  *
  * Coordinates are centimetres, y-up (the domain convention). Titan's draft is
- * deterministic (titanPants.test.ts); the named-edge anatomy below is pinned
- * by tests at the template so an adapter upgrade that changes the topology
- * fails loudly instead of mis-seaming.
+ * deterministic (titanPants.test.ts); the seam chains are resolved from the
+ * drafted geometry at draft time (see data/pantsSeams.ts) — an adapter
+ * upgrade that changes the topology in an unresolvable way fails loudly
+ * instead of mis-seaming.
  */
 import type {
   EdgeChain,
@@ -26,7 +28,6 @@ import type {
 } from '../model';
 import {
   closePath,
-  createSeamStep,
   createStarterProject,
   lineTo,
   moveTo,
@@ -34,55 +35,20 @@ import {
 } from '../model';
 import { vec2 } from '../model';
 import type { PantMeasurements } from '../engine/titanSettings';
-import { TITAN_PANTS_TEMPLATE, forkDepthCm } from '../engine/titanSettings';
+import { TITAN_PANTS_TEMPLATE } from '../engine/titanSettings';
 import { redraftPants } from '../engine/titanPants';
+import type { MeasuredLegSeams } from './pantsSeams';
+import { measureLegSeams, pantsSeamSteps } from './pantsSeams';
 
 /**
- * Titan leg outlines have a fixed command anatomy at the template draft:
- * 7 vertices each (M + six segments + Z). Every chain here names a whole
- * edge run off that anatomy — EdgeChain granularity is whole outline edges,
- * so a sub-edge (a pocket mouth partway down the side seam) cannot be
- * referenced. Valid at the template and its neighbourhood; Titan may add
- * outline vertices at extreme ease settings, where these chains stay in
- * bounds but their semantics are not guaranteed.
+ * Declared ease for the pants' rise seam (see SeamStep.ease): Titan fits
+ * the front crotch seam and the back cross seam to different targets
+ * (`crossSeamFront` / `crossSeamBack`), so the two rise traces legitimately
+ * differ beyond the default 5% gate. The largest gap measured across the
+ * panel's parameter ranges is ~12%; the declaration leaves headroom above
+ * it while still rejecting a wrong-edge chain (which lands far outside).
  */
-export const LEG_VERTEX_COUNT = 7;
-
-/** Adapter ids for the two leg pieces (see engine/titanPants.ts). */
-const FRONT_ID = 'pants-front';
-const BACK_ID = 'pants-back';
-
-export const FRONT_CHAINS = {
-  /** Waist side corner down to the hem: one long cubic. */
-  outseam: { pieceId: FRONT_ID, startVertex: 0, edgeCount: 1 },
-  hem: { pieceId: FRONT_ID, startVertex: 1, edgeCount: 1 },
-  /** Hem corner up to the fork: the inseam (lower crotch included). */
-  inseam: { pieceId: FRONT_ID, startVertex: 2, edgeCount: 1 },
-  /** Fork up to the centre-front waist corner: the rise, fly edge included. */
-  rise: { pieceId: FRONT_ID, startVertex: 3, edgeCount: 2 },
-  /** Just the crotch curve + fly extension bump (fork → fly notch). */
-  flyExtension: { pieceId: FRONT_ID, startVertex: 3, edgeCount: 1 },
-  /** Centre-front waist corner across to the side: the front's waist edge. */
-  waist: { pieceId: FRONT_ID, startVertex: 5, edgeCount: 1 },
-} satisfies Record<string, EdgeChain>;
-
-export const BACK_CHAINS = {
-  /** Fork down to the hem: the back's inseam (mirror of the front's). */
-  inseam: { pieceId: BACK_ID, startVertex: 0, edgeCount: 1 },
-  hem: { pieceId: BACK_ID, startVertex: 1, edgeCount: 1 },
-  outseam: { pieceId: BACK_ID, startVertex: 2, edgeCount: 1 },
-  /** Side waist corner across to the centre back: the back's waist edge. */
-  waist: { pieceId: BACK_ID, startVertex: 3, edgeCount: 1 },
-  /** Centre-back waist corner around the seat down to the fork. */
-  rise: { pieceId: BACK_ID, startVertex: 4, edgeCount: 2 },
-} satisfies Record<string, EdgeChain>;
-
-/** The fly shield's attach edge: its long top edge (sized to the front's fly edge). */
-const SHIELD_ATTACH_CHAIN = {
-  pieceId: 'fly-shield',
-  startVertex: 0,
-  edgeCount: 1,
-} satisfies EdgeChain;
+export const RISE_SEAM_EASE = 0.2;
 
 /** Seam allowance recorded on hand-authored aux pieces (notebook-holder convention). */
 const AUX_SEAM_ALLOWANCE = 1.5;
@@ -92,11 +58,8 @@ const WAISTBAND_DEPTH_CM = 4;
 const POCKET_DEPTH_FRACTION = 0.75;
 /** Finished fly-shield width as a fraction of its attach-edge length. */
 const SHIELD_WIDTH_FRACTION = 0.55;
-/** Front fly-edge length as a fraction of the fork depth — measured from the
- * Titan template draft (fly edge chord ≈ 0.46 × fork depth). */
-const SHIELD_ATTACH_PER_FORK_DEPTH = 0.46;
 /** Pocket mouth as a multiple of the front's waist edge (a slant opening). */
-const POCKET_MOUTH_PER_WAIST_QUARTER = 1.2;
+const POCKET_MOUTH_PER_FRONT_WAIST = 1.2;
 
 /** Horizontal grainline arrow centred at (cx, cy), spanning ±halfSpan. */
 function horizontalGrainMarks(
@@ -136,29 +99,29 @@ function notchMark(x: number): PathCmd[] {
 }
 
 /**
- * The hand-authored auxiliaries, sized from the measurements:
+ * The hand-authored auxiliaries, sized from the legs' measured seam edges:
  *
- * - Waistband: a rectangle as long as the full eased waist circumference
- *   (two cut-2 legs wrap it once), its bottom edge split at the quarter
- *   points so each half can be named to a leg. Grain runs along its length.
- * - Fly shield: a rounded tongue whose attach edge matches the front's fly
- *   extension edge; it grows with the fork depth as the crotch drops.
+ * - Waistband: a rectangle as long as the full waist circumference (two
+ *   cut-2 legs wrap it once), its bottom edge split into quarters laid out
+ *   [front][back][back][front] in sewing order so each half can be named to
+ *   a leg and the centre-back notch sits at the band's midpoint. Grain runs
+ *   along its length.
+ * - Fly shield: a rounded tongue whose attach edge IS the front's measured
+ *   fly edge, so it always matches the leg it joins.
  * - Pocket bag: a rounded pouch with a mouth scaled to the front's waist
  *   edge (a slant-pocket opening), caught in the side seam at assembly.
  */
-export function pantsAuxPieces(measurements: PantMeasurements): Piece[] {
-  const easedWaist =
-    measurements.waistCm * (1 + measurements.waistEasePct / 100);
-  const waistQuarter = easedWaist / 4;
+export function pantsAuxPieces(measured: MeasuredLegSeams): Piece[] {
+  const frontWaist = measured.frontWaistCm;
+  const backWaist = measured.backWaistCm;
 
-  // --- Waistband -----------------------------------------------------------
-  const bandLength = easedWaist;
-  const quarter = bandLength / 4;
+  // --- Waistband: bottom-edge quarters laid out [F][B][B][F] ---------------
+  const bandLength = frontWaist * 2 + backWaist * 2;
   const bandOutline = [
     moveTo(vec2(0, 0)),
-    lineTo(vec2(quarter, 0)),
-    lineTo(vec2(quarter * 2, 0)),
-    lineTo(vec2(quarter * 3, 0)),
+    lineTo(vec2(frontWaist, 0)),
+    lineTo(vec2(frontWaist + backWaist, 0)),
+    lineTo(vec2(frontWaist + backWaist + backWaist, 0)),
     lineTo(vec2(bandLength, 0)),
     lineTo(vec2(bandLength, WAISTBAND_DEPTH_CM)),
     lineTo(vec2(0, WAISTBAND_DEPTH_CM)),
@@ -166,13 +129,17 @@ export function pantsAuxPieces(measurements: PantMeasurements): Piece[] {
   ];
   // Centre-back notch on the bottom edge at the band's midpoint.
   const bandMarks = [
-    ...horizontalGrainMarks(quarter * 2, WAISTBAND_DEPTH_CM / 2, quarter * 0.7),
-    moveTo(vec2(quarter * 2, 0.4)),
-    lineTo(vec2(quarter * 2, 1.6)),
+    ...horizontalGrainMarks(
+      bandLength / 2,
+      WAISTBAND_DEPTH_CM / 2,
+      bandLength / 4 * 0.7,
+    ),
+    moveTo(vec2(bandLength / 2, 0.4)),
+    lineTo(vec2(bandLength / 2, 1.6)),
   ];
 
   // --- Fly shield ----------------------------------------------------------
-  const attachLength = forkDepthCm(measurements) * SHIELD_ATTACH_PER_FORK_DEPTH;
+  const attachLength = measured.frontFlyEdgeCm;
   const shieldWidth = attachLength * SHIELD_WIDTH_FRACTION;
   const shieldOutline = [
     moveTo(vec2(0, 0)),
@@ -189,7 +156,7 @@ export function pantsAuxPieces(measurements: PantMeasurements): Piece[] {
   const shieldMarks = [...notchMark(0.6), ...notchMark(attachLength - 0.6)];
 
   // --- Pocket bag ----------------------------------------------------------
-  const mouth = waistQuarter * POCKET_MOUTH_PER_WAIST_QUARTER;
+  const mouth = frontWaist * POCKET_MOUTH_PER_FRONT_WAIST;
   const depth = mouth * POCKET_DEPTH_FRACTION;
   const r = Math.min(3, depth / 3);
   const pocketOutline = [
@@ -215,7 +182,7 @@ export function pantsAuxPieces(measurements: PantMeasurements): Piece[] {
       internal: bandMarks,
       grainline: {
         angle: 0,
-        placement: vec2(quarter * 2, WAISTBAND_DEPTH_CM / 2),
+        placement: vec2(bandLength / 2, WAISTBAND_DEPTH_CM / 2),
       },
       seamAllowance: AUX_SEAM_ALLOWANCE,
       cutCount: 1,
@@ -244,16 +211,41 @@ export function pantsAuxPieces(measurements: PantMeasurements): Piece[] {
   ];
 }
 
+/** The redrafted starter: pieces plus the assembly resolved from their geometry. */
+export interface RedraftedPants {
+  readonly pieces: readonly Piece[];
+  /** Seam chains resolved per draft — rebuilt on every redraft. */
+  readonly assembly: readonly SeamStep[];
+}
+
 /**
- * The full starter piece set at the given measurements: adapter legs plus the
- * measurement-sized auxiliaries. This is the unit the starter project and the
- * measurements panel's live redraft both consume.
+ * The full starter piece set at the given measurements — adapter legs plus
+ * measured-sized auxiliaries — with the seam steps resolved from the fresh
+ * draft's geometry. This is the unit the starter project and the
+ * measurements panel's live redraft both consume, so a redraft never leaves
+ * stale chain indices behind (fixed indices were the UX-15 bug's root
+ * cause: Titan's outline topology shifts across the parameter range).
  */
 export function redraftPantsStarter(
   measurements: PantMeasurements,
-): readonly Piece[] {
+): RedraftedPants {
   const legs = redraftPants(measurements);
-  return [...legs, ...pantsAuxPieces(measurements)];
+  const legPair = { front: legs[0]!, back: legs[1]! };
+  const measured = measureLegSeams(legPair.front, legPair.back);
+  // The band's bottom edge quarters run [F][B][B][F] (see pantsAuxPieces),
+  // so the front waist joins quarter 0 and the back waist quarter 1.
+  const assembly = pantsSeamSteps(
+    legPair,
+    {
+      front: { pieceId: 'waistband', startVertex: 0, edgeCount: 1 },
+      back: { pieceId: 'waistband', startVertex: 1, edgeCount: 1 },
+    },
+    RISE_SEAM_EASE,
+  );
+  return {
+    pieces: [...legs, ...pantsAuxPieces(measured)],
+    assembly,
+  };
 }
 
 /** The pants starter's default measurements: Titan's size-40 template. */
@@ -279,6 +271,8 @@ export function outlineHeightCm(outline: readonly PathCmd[]): number {
 /**
  * Named edges of the waistband outline (bottom edge split at the quarter
  * points; the centre back sits at the midpoint, where quarters 1 and 2 meet).
+ * Structural constants of the hand-authored band — its outline is fixed
+ * regardless of the measurements; only the quarter lengths change.
  */
 export const WAISTBAND_CHAINS = {
   /** Bottom-left quarter — the front's waist joins here. */
@@ -294,66 +288,6 @@ export const WAISTBAND_CHAINS = {
     edgeCount: 1,
   } satisfies EdgeChain,
 };
-
-/**
- * The starter's ordered seams, in sewing order: fly first (it is built on
- * the front before any joins), then the rise, the long seams with the
- * pocket bags caught in the outseam, and the waistband last so the notches
- * line up. The pocket bag has no step of its own — it is caught in the
- * outseam; EdgeChain granularity is whole outline edges, and the block
- * drafts no separate pocket-mouth edge to reference.
- */
-export const PANTS_SEAM_STEPS: readonly SeamStep[] = [
-  createSeamStep({
-    pieces: ['fly-shield', FRONT_ID],
-    edges: [SHIELD_ATTACH_CHAIN, FRONT_CHAINS.flyExtension],
-    order: 1,
-    note:
-      'Baste the fly shield behind the front’s fly extension first — it backs ' +
-      'the buttonhole placket and keeps the fly from gaping.',
-  }),
-  createSeamStep({
-    pieces: [FRONT_ID, BACK_ID],
-    edges: [FRONT_CHAINS.rise, BACK_CHAINS.rise],
-    order: 2,
-    note:
-      'Stay-stitch both crotch curves before joining — this rise seam sets the ' +
-      'fit, and a stretched curve here is the most common beginner fault. Ease ' +
-      'the front gently around the seat rather than stretching it flat.',
-  }),
-  createSeamStep({
-    pieces: [FRONT_ID, BACK_ID],
-    edges: [FRONT_CHAINS.outseam, BACK_CHAINS.outseam],
-    order: 3,
-    note:
-      'Sew the side seams next and the legs become tubes. The pocket bags are ' +
-      'caught in this seam — their notches mark where the mouth opens.',
-  }),
-  createSeamStep({
-    pieces: [FRONT_ID, BACK_ID],
-    edges: [FRONT_CHAINS.inseam, BACK_CHAINS.inseam],
-    order: 4,
-    note:
-      'The inseam curves around the inner leg; ease it to the back piece ' +
-      'rather than stretching it flat.',
-  }),
-  createSeamStep({
-    pieces: [FRONT_ID, 'waistband'],
-    edges: [FRONT_CHAINS.waist, WAISTBAND_CHAINS.front],
-    order: 5,
-    note:
-      'Right sides together along the front waist. The band’s grainline runs ' +
-      'parallel to the waist so it stays firm and the notches meet.',
-  }),
-  createSeamStep({
-    pieces: [BACK_ID, 'waistband'],
-    edges: [BACK_CHAINS.waist, WAISTBAND_CHAINS.back],
-    order: 6,
-    note:
-      'Join the back half the same way — centre the band’s centre-back notch ' +
-      'at the centre back before stitching.',
-  }),
-];
 
 export const PANTS_LEARN_CARD =
   "What you'll learn: pants put curves and fit stakes on everything the notebook " +
@@ -382,6 +316,7 @@ let cachedStarter: StarterProject | null = null;
 export function pantsStarter(): StarterProject {
   if (cachedStarter === null) {
     const m = TITAN_PANTS_TEMPLATE;
+    const drafted = redraftPantsStarter(m);
     cachedStarter = createStarterProject({
       id: 'starter-pants',
       name: 'Pants',
@@ -396,8 +331,8 @@ export function pantsStarter(): StarterProject {
         crotchDrop: m.crotchDropPct,
       },
       fabric: PANTS_FABRIC,
-      pieces: redraftPantsStarter(m),
-      assembly: PANTS_SEAM_STEPS,
+      pieces: drafted.pieces,
+      assembly: drafted.assembly,
       learnCard: PANTS_LEARN_CARD,
     });
   }

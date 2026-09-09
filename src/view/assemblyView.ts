@@ -16,11 +16,13 @@ import {
   Color,
   DirectionalLight,
   EdgesGeometry,
+  Fog,
   Group,
   HemisphereLight,
   Line,
   LineBasicMaterial,
   LineSegments,
+  MathUtils,
   Matrix4,
   Mesh,
   MeshPhysicalMaterial,
@@ -31,7 +33,9 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three';
+import type { Box3 } from 'three';
 import type { FabricSpec, Project } from '../model';
+import { SCENE } from '../tokens';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import {
   evaluateAssemblyPose,
@@ -41,12 +45,21 @@ import {
 import type { AssemblyPlan } from '../engine/assembly';
 import { createFabricTextures, roughnessFor } from './fabricTexture';
 import {
+  cameraDurationMs,
+  computeSeamFrame,
+  easedProgress01,
+  foldDurationMs,
+  prefersReducedMotion,
+  seamIsCurved,
+} from './walkthroughMotion';
+import {
   shadowFrustumHalfExtentForRectsCm,
   surfacesWorldRectCm,
   sweptGroundRectCm,
   type WorldRectCm,
 } from './cameraFit';
 import { createSurfaceMeshes } from './surfaceMeshes';
+import { ROOM_FOG_FAR_CM, ROOM_FOG_NEAR_CM } from './matSurface';
 import {
   applyGrainlineUVs,
   marksGeometry,
@@ -75,6 +88,12 @@ export interface AssemblyView {
   readonly plan: AssemblyPlan;
   /** Apply a scrub state: prior seams folded, seam stepIndex at t. */
   setScrub(stepIndex: number, t: number): void;
+  /**
+   * UX-01: pre-frame the camera on the seam about to fold (per the motion
+   * spec) so the fold in progress is always visible. Glides unless reduced
+   * motion is requested; a user orbit cancels the glide.
+   */
+  preFrameSeam(stepIndex: number, forward: boolean): void;
   /** Re-skin every piece with a new fabric spec, live. */
   applyFabric(spec: FabricSpec): void;
   /** Dev/dogfood aid: each piece's centre in client coordinates. */
@@ -95,14 +114,16 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
   renderer.shadowMap.type = PCFSoftShadowMap;
 
   const scene = new Scene();
-  scene.background = new Color('#23282e');
+  scene.background = new Color(SCENE.background);
+  // Soft room-air fade (UX-04), same workroom as the viewport.
+  scene.fog = new Fog(SCENE.background, ROOM_FOG_NEAR_CM, ROOM_FOG_FAR_CM);
 
   const camera = new PerspectiveCamera(40, 1, 0.5, 4000);
 
   // --- Lights (same rig as the viewport) ---------------------------------
-  const hemi = new HemisphereLight('#e8eef4', '#3a4038', 1.0);
+  const hemi = new HemisphereLight(SCENE.hemiSky, SCENE.hemiGround, 1.0);
   scene.add(hemi);
-  const sun = new DirectionalLight('#fff8ec', 2.2);
+  const sun = new DirectionalLight(SCENE.sun, 2.2);
   sun.position.set(90, 170, 110);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -121,9 +142,17 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
   let currentFabric: FabricSpec = project.fabric;
   const fabricTextures = createFabricTextures(currentFabric);
 
-  const disposables: { dispose(): void }[] = [surfaces, fabricTextures];
+  const disposables: { dispose(): void }[] = [
+    surfaces,
+    fabricTextures,
+  ];
   const pieceViews: AssemblyPieceView[] = [];
   const meshes: Mesh[] = [];
+  /**
+   * Piece-local bounding boxes (UX-01): the camera pre-frame sweeps these
+   * through the engine's step poses to frame the fold's full motion.
+   */
+  const localBoxes = new Map<string, Box3>();
   /** pose · T(0, lift, 0): engine pose with the anti-z-fight lift. */
   const liftedPose = new Matrix4();
   const lift = new Matrix4().makeTranslation(0, PIECE_LIFT_CM, 0);
@@ -136,6 +165,10 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
     // centre to the local origin so poses map straight onto this mesh.
     outlineGeometry.translate(-centre.x, -centre.y, 0);
     outlineGeometry.rotateX(-Math.PI / 2);
+    outlineGeometry.computeBoundingBox();
+    if (outlineGeometry.boundingBox) {
+      localBoxes.set(piece.id, outlineGeometry.boundingBox.clone());
+    }
 
     const material = new MeshPhysicalMaterial({
       map: fabricTextures.map,
@@ -160,11 +193,11 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
     const edgeGeometry = new EdgesGeometry(outlineGeometry, 10);
     const outline = new LineSegments(
       edgeGeometry,
-      new LineBasicMaterial({ color: '#1c242b' }),
+      new LineBasicMaterial({ color: SCENE.outline }),
     );
     const marks = new LineSegments(
       marksGeometry(piece.internal),
-      new LineBasicMaterial({ color: '#24303a' }),
+      new LineBasicMaterial({ color: SCENE.marks }),
     );
     marks.position.y = 0.04;
 
@@ -222,7 +255,8 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
   applyAssemblyShadowFrustum();
 
   // --- Current-seam highlight ---------------------------------------------
-  const seamMaterial = new LineBasicMaterial({ color: '#ffd166' });
+  // The current seam: a seam check — the token's green, verbatim.
+  const seamMaterial = new LineBasicMaterial({ color: SCENE.seam });
   const seamLine = new Line(new BufferGeometry(), seamMaterial);
   seamLine.visible = false;
   seamLine.position.y = SEAM_LIFT_CM;
@@ -272,6 +306,60 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
   controls.target.set(0, 0, -5);
   controls.update();
 
+  // --- Camera pre-frame (UX-01) ---------------------------------------------
+  // On each button step the camera glides to frame the seam about to fold —
+  // the fold's swept volume — so the motion in progress is always visible.
+  // Only target and distance move; the user's viewing angle is preserved.
+  interface CameraGlide {
+    fromPos: Vector3;
+    toPos: Vector3;
+    fromTarget: Vector3;
+    toTarget: Vector3;
+    startMs: number;
+    durationMs: number;
+  }
+  let cameraGlide: CameraGlide | null = null;
+
+  const preFrameSeam = (stepIndex: number, forward: boolean): void => {
+    const step = plan.steps[stepIndex];
+    if (!step) return;
+    const frame = computeSeamFrame({
+      plan,
+      stepIndex,
+      localBoxes,
+      fovYRad: MathUtils.degToRad(camera.fov),
+      aspect: camera.aspect,
+      cameraPosition: camera.position,
+      cameraTarget: controls.target,
+      minDistance: controls.minDistance,
+      maxDistance: controls.maxDistance,
+    });
+    if (!frame) return;
+    if (prefersReducedMotion()) {
+      // Reduced motion: jump straight to the legible seam frame.
+      cameraGlide = null;
+      camera.position.copy(frame.position);
+      controls.target.copy(frame.target);
+      controls.update();
+      return;
+    }
+    cameraGlide = {
+      fromPos: camera.position.clone(),
+      toPos: frame.position,
+      fromTarget: controls.target.clone(),
+      toTarget: frame.target,
+      startMs: performance.now(),
+      durationMs: cameraDurationMs(
+        foldDurationMs(forward, seamIsCurved(step.anchorChainWorld)),
+      ),
+    };
+  };
+
+  // The user wins in between steps: touching the canvas cancels the glide.
+  controls.addEventListener('start', () => {
+    cameraGlide = null;
+  });
+
   // --- Live fabric swap -------------------------------------------------------
   const applyFabric = (spec: FabricSpec): void => {
     currentFabric = spec;
@@ -302,7 +390,26 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
   observer.observe(container);
   resize();
 
-  renderer.setAnimationLoop(() => {
+  renderer.setAnimationLoop((time) => {
+    if (cameraGlide) {
+      // UX-01: ease the camera onto the seam frame (rAF timestamps and
+      // performance.now share the time-origin millisecond clock).
+      const progress = easedProgress01(
+        time - cameraGlide.startMs,
+        cameraGlide.durationMs,
+      );
+      camera.position.lerpVectors(
+        cameraGlide.fromPos,
+        cameraGlide.toPos,
+        progress,
+      );
+      controls.target.lerpVectors(
+        cameraGlide.fromTarget,
+        cameraGlide.toTarget,
+        progress,
+      );
+      if (progress >= 1) cameraGlide = null;
+    }
     controls.update();
     renderer.render(scene, camera);
   });
@@ -338,8 +445,17 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
     });
   };
 
-  // Initial state: everything flat, first seam highlighted.
+  // Initial state: everything flat, first seam highlighted, camera pre-framed
+  // on seam 1 (UX-01) — the walkthrough opens on the fold about to happen.
   setScrub(0, 0);
+  preFrameSeam(0, true);
 
-  return { plan, setScrub, applyFabric, pieceScreenPositions, dispose };
+  return {
+    plan,
+    setScrub,
+    preFrameSeam,
+    applyFabric,
+    pieceScreenPositions,
+    dispose,
+  };
 }

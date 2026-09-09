@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createStarterProject } from '../model';
 import { NOTEBOOK_HOLDER_STARTER } from '../data/notebookHolder';
+import { TOTE_STARTER } from '../data/tote';
 import { createPiecePanel } from './panel';
 import { createSelectionStore } from './selection';
 
@@ -10,9 +11,15 @@ function setup() {
   const project = createStarterProject(NOTEBOOK_HOLDER_STARTER);
   const selection = createSelectionStore();
   const onPreset = vi.fn();
-  const handle = createPiecePanel(container, project.pieces, selection, {
-    onPreset,
-  });
+  const handle = createPiecePanel(
+    container,
+    project.pieces,
+    project.assembly,
+    selection,
+    {
+      onPreset,
+    },
+  );
   return { container, project, selection, onPreset, handle };
 }
 
@@ -94,7 +101,7 @@ describe('piece panel', () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
     const selection = createSelectionStore();
-    const handle = createPiecePanel(container, [], selection, {
+    const handle = createPiecePanel(container, [], [], selection, {
       onPreset: vi.fn(),
     });
 
@@ -115,6 +122,95 @@ describe('piece panel', () => {
       (container.querySelector('.piece-list') as HTMLElement | null)?.hidden,
     ).toBe(false);
 
+    handle.dispose();
+    container.remove();
+  });
+
+  it('names the assembly seams inline (UX-07) so the build order is legible before Assemble', () => {
+    const { container, project, handle } = setup();
+    const seams = container.querySelector<HTMLElement>('.panel-seams')!;
+    expect(seams.hidden).toBe(false);
+    const firstName = project.assembly[0]!.name!;
+    const secondName = project.assembly[1]!.name!;
+    // The ⓘ affordance lands inside the sentence; read the plain text.
+    const plain = seams.textContent!.replaceAll('ⓘ', '').replace(/\s+/g, ' ');
+    expect(plain).toContain(`Assembly — 2 seams`);
+    expect(plain).toContain(`${firstName}, ${secondName}.`);
+    handle.dispose();
+    container.remove();
+  });
+
+  it('falls back to joined piece names for seams predating UX-07 naming', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const project = createStarterProject(NOTEBOOK_HOLDER_STARTER);
+    const anonymous = project.assembly.map((step) => ({ ...step, name: undefined }));
+    const selection = createSelectionStore();
+    const handle = createPiecePanel(
+      container,
+      project.pieces,
+      anonymous,
+      selection,
+      { onPreset: vi.fn() },
+    );
+    const seams = container.querySelector<HTMLElement>('.panel-seams')!;
+    expect(seams.textContent).toContain(
+      'Flap → Outer cover',
+    );
+    handle.dispose();
+    container.remove();
+  });
+
+  it('hides the seams line when the project has no assembly', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const selection = createSelectionStore();
+    const handle = createPiecePanel(
+      container,
+      [],
+      [],
+      selection,
+      { onPreset: vi.fn() },
+    );
+    const seams = container.querySelector<HTMLElement>('.panel-seams')!;
+    expect(seams.hidden).toBe(true);
+    expect(seams.textContent).toBe('');
+    handle.dispose();
+    container.remove();
+  });
+
+  it('chips the cut-count shorthand and opens its definition inline (UX-07)', () => {
+    const { container, handle } = setup();
+    const meta = container.querySelector<HTMLElement>('.piece-meta')!;
+    const chip = meta.querySelector<HTMLButtonElement>('.term-chip')!;
+    expect(chip.textContent).toContain('cut 1');
+    chip.click();
+    const card = document.body.lastElementChild as HTMLElement;
+    expect(card.hidden).toBe(false);
+    expect(card.querySelector('.glossary-popover-term')?.textContent).toBe(
+      'cut count',
+    );
+    handle.dispose();
+    container.remove();
+  });
+
+  it('shows glossary chips for the tote’s facing and raw edge (UX-07 surfaces)', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const project = createStarterProject(TOTE_STARTER);
+    const selection = createSelectionStore();
+    const handle = createPiecePanel(
+      container,
+      project.pieces,
+      project.assembly,
+      selection,
+      { onPreset: vi.fn() },
+    );
+    const seams = container.querySelector<HTMLElement>('.panel-seams')!;
+    const labels = [...seams.querySelectorAll('.term-chip')].map((chip) =>
+      chip.getAttribute('aria-label'),
+    );
+    expect(labels).toContain('What does “facing” mean?');
     handle.dispose();
     container.remove();
   });
