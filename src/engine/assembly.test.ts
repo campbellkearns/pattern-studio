@@ -217,6 +217,110 @@ describe('two-piece rectangle fold', () => {
   });
 });
 
+describe('pose continuity across step boundaries (UX-01)', () => {
+  // Chain a→b→c: two folds. Step 0 folds a onto b; step 1 folds c onto b's
+  // far edge. The walkthrough tweens across the step boundary, so the pose
+  // at the END of step 0 must equal the pose at the START of step 1 —
+  // otherwise every Next/Prev click would pop.
+  const a = rectPiece('a', 10, 20);
+  const b = rectPiece('b', 10, 20);
+  const c = rectPiece('c', 10, 20);
+  const project = projectOf(
+    [a, b, c],
+    [
+      seam(
+        'a',
+        { pieceId: 'a', startVertex: 1, edgeCount: 1 },
+        'b',
+        { pieceId: 'b', startVertex: 3, edgeCount: 1 },
+        1,
+      ),
+      seam(
+        'c',
+        { pieceId: 'c', startVertex: 3, edgeCount: 1 },
+        'b',
+        { pieceId: 'b', startVertex: 1, edgeCount: 1 },
+        2,
+      ),
+    ],
+  );
+  const chainPlan = planAssembly(project);
+
+  it('plans two steps', () => {
+    expect(chainPlan.steps).toHaveLength(2);
+    expect(chainPlan.steps[0]!.moverGroup).toEqual(['a']);
+    expect(chainPlan.steps[1]!.moverGroup).toEqual(['c']);
+  });
+
+  it('the end of step 0 is exactly the start of step 1 (no snap at the boundary)', () => {
+    const atEndOfStep0 = evaluateAssemblyPose(chainPlan, 0, 1);
+    const atStartOfStep1 = evaluateAssemblyPose(chainPlan, 1, 0);
+    for (const pieceId of ['a', 'b', 'c']) {
+      const before = atEndOfStep0.get(pieceId)!.toArray();
+      const after = atStartOfStep1.get(pieceId)!.toArray();
+      before.forEach((element, index) =>
+        expect(element).toBeCloseTo(after[index]!, 9),
+      );
+    }
+  });
+
+  it('walking backward retraces the forward fold (Prev undoes Next)', () => {
+    // Walking backward from the end through the reversed fold passes every
+    // forward pose: at each sampled t, pose(1-t) must be the forward pose
+    // mirrored through the hinge rotation by sweepSign·(1-2t)·π.
+    const step = chainPlan.steps[1]!;
+    const hinge = step.hinge;
+    for (const t of [0.2, 0.35, 0.5, 0.65, 0.8]) {
+      const reversed = evaluateAssemblyPose(chainPlan, 1, 1 - t).get('c')!;
+      const forward = evaluateAssemblyPose(chainPlan, 1, t).get('c')!;
+      // pose(1-t) = R(sweepSign·(1-2t)·π) applied to pose(t) about the hinge.
+      const rotation = new Matrix4()
+        .makeTranslation(hinge.origin.x, hinge.origin.y, hinge.origin.z)
+        .multiply(
+          new Matrix4().makeRotationAxis(
+            hinge.direction,
+            step.sweepSign * (1 - 2 * t) * Math.PI,
+          ),
+        )
+        .multiply(
+          new Matrix4().makeTranslation(
+            -hinge.origin.x,
+            -hinge.origin.y,
+            -hinge.origin.z,
+          ),
+        );
+      const mirrored = forward.clone().premultiply(rotation);
+      mirrored
+        .toArray()
+        .forEach((element, index) =>
+          expect(element).toBeCloseTo(reversed.toArray()[index]!, 9),
+        );
+    }
+  });
+
+  it('is pure: evaluating a pose never mutates the plan', () => {
+    const snapshot = chainPlan.steps.map((stepPlan) => ({
+      hingeOrigin: stepPlan.hinge.origin.toArray(),
+      hingeDirection: stepPlan.hinge.direction.toArray(),
+      basePoses: [...chainPlan.basePoses.entries()].map(
+        ([id, matrix]) => [id, matrix.toArray()] as const,
+      ),
+    }));
+    evaluateAssemblyPose(chainPlan, 0, 0.42);
+    evaluateAssemblyPose(chainPlan, 1, 0.17);
+    chainPlan.steps.forEach((stepPlan, index) => {
+      const expected = snapshot[index]!;
+      expect(stepPlan.hinge.origin.toArray()).toEqual(expected.hingeOrigin);
+      expect(stepPlan.hinge.direction.toArray()).toEqual(
+        expected.hingeDirection,
+      );
+      for (const [id, matrix] of expected.basePoses) {
+        expect(chainPlan.basePoses.get(id)!.toArray()).toEqual(matrix);
+      }
+    });
+  });
+});
+
 describe('plan gates', () => {
   it('rejects chains whose measured lengths differ beyond tolerance', () => {
     const a = rectPiece('a', 10, 20);
