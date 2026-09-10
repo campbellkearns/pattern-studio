@@ -75,6 +75,13 @@ export const SCENE = {
   selectHighlight: COBALT_BLUE,
   /** The current seam in the assembly walkthrough: a seam check. */
   seam: CUTTING_MAT_GREEN,
+  /**
+   * Mat/paper dashed boundary (UX-12): the last off-palette literal
+   * (#6e6759, a warm grey outside the five hues) now reads Azure Line —
+   * the documented line-role variant that clears WCAG 3:1 on paper
+   * white, where the old literal's hue introduced a sixth colour.
+   */
+  boundary: AZURE_LINE,
   hoverEmissive: HOVER_EMISSIVE,
   selectEmissive: SELECT_EMISSIVE,
   /**

@@ -75,6 +75,17 @@ describe('five-token design system (UX-06)', () => {
     expect(SCENE.hoverHighlight).toBe(DRAFTING_AMBER);
     expect(SCENE.selectHighlight).toBe(COBALT_BLUE);
     expect(SCENE.seam).toBe(CUTTING_MAT_GREEN);
+    // UX-12: the mat/paper boundary joins the palette — no sixth hue.
+    expect(SCENE.boundary).toBe(AZURE_LINE);
+  });
+
+  it('keeps the retired boundary grey out of the scene sources (UX-12)', () => {
+    // The off-palette #6e6759 literal's last use was the dashed boundary;
+    // guard against it creeping back into any view that paints colour.
+    for (const file of ['surfaceMeshes.ts', 'assemblyView.ts', 'viewport.ts']) {
+      const source = readFileSync(join(process.cwd(), 'src/view', file), 'utf8');
+      expect(source).not.toContain('#6e6759');
+    }
   });
 
   it('keeps scene extras within documented variants and neutrals', () => {
