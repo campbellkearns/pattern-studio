@@ -63,8 +63,10 @@ import {
   applyFabric,
   assemblyEntryMessage,
   beginEntry,
+  beginOrderReview,
   cancelEntry,
   cancelEntryMessage,
+  cancelOrderReview,
   chooseEntryFabric,
   chooseEntryProject,
   enterAssembly,
@@ -76,6 +78,9 @@ import {
   initialEntryState,
   mirrorSelection,
   NOTHING_SELECTED_MESSAGE,
+  orderReviewEmptyMessage,
+  orderReviewMessage,
+  orderReviewRows,
   redraftPieces,
   selectPiece,
   statusText,
@@ -84,6 +89,8 @@ import {
 import type { AppState, TransitionResult } from './appState';
 import { createEntryFlow } from './view/entryFlow';
 import type { EntryFlowHandle } from './view/entryFlow';
+import { createOrderReview } from './view/orderReview';
+import type { OrderReviewHandle } from './view/orderReview';
 import { createViewport } from './view/viewport';
 import type { Viewport } from './view/viewport';
 
@@ -282,6 +289,7 @@ export function mountApp(root: HTMLElement): void {
   let assembleButton: HTMLButtonElement | null = null;
   let refitButtonHandle: RefitButtonHandle | null = null;
   let entryHandle: EntryFlowHandle | null = null;
+  let orderReviewHandle: OrderReviewHandle | null = null;
 
   /** Swap the live project: tear the old views down, mount fresh ones. */
   const mountProject = (project: Project): void => {
@@ -473,11 +481,14 @@ export function mountApp(root: HTMLElement): void {
     });
   }
 
-  /** Assemble button / shortcut: swap the mat for the walkthrough. */
+  /**
+   * Assemble shortcut target and the order review's Start stitching action
+   * (UX-10): swap the stage for the walkthrough. The walkthrough can be
+   * requested from the mat or from the order review (where Start stitching
+   * is the review's one action) — mirrors the button's disabled state.
+   */
   function tryEnterAssembly(): void {
-    // Entry is a mode, not a selection state: the walkthrough can only be
-    // requested from the mat (UX-08) — mirrors the button's disabled state.
-    if (state.mode !== 'mat') return;
+    if (state.mode !== 'mat' && state.mode !== 'review') return;
     try {
       buildAssemblyScene();
     } catch (error) {
@@ -581,6 +592,76 @@ export function mountApp(root: HTMLElement): void {
     }
   }
 
+  // --- Order review (UX-10: the order, reviewable before starting) ---------
+  // Same discipline as the entry flow: the review holds the stage (no scene
+  // renders or listens behind it), it is a pure render of the model — the
+  // rows read straight off project.assembly — and every action dispatches a
+  // transition. Start stitching reuses the existing assembly entry path;
+  // Back remounts the mat through the mode transition.
+
+  function disposeOrderReviewSurface(): void {
+    orderReviewHandle?.dispose();
+    orderReviewHandle = null;
+  }
+
+  function mountOrderReviewSurface(): void {
+    if (state.mode !== 'review') return;
+    // The review holds the stage: tear both scenes down so nothing renders
+    // or listens behind it; the mat remounts on the way back (a mode change
+    // to 'mat' rebuilds when no viewport is live).
+    disposeAssemblyScene();
+    panelHandle?.dispose();
+    panelHandle = null;
+    legendHandle?.dispose();
+    legendHandle = null;
+    fabricHandle?.dispose();
+    fabricHandle = null;
+    measurementsHandle?.dispose();
+    measurementsHandle = null;
+    viewport?.dispose();
+    viewport = null;
+    refitButtonHandle?.setEnabled(false);
+    orderReviewHandle = createOrderReview(layout, state.project, {
+      // Start stitching is the existing assembly entry (UX-10): same path
+      // the Assemble button used before the review existed — scene build,
+      // enterAssembly transition, walkthrough narration.
+      onStart: () => tryEnterAssembly(),
+      onBack: () => exitOrderReviewToMat(),
+    });
+  }
+
+  /** Leave the review for the mat; shared by the button and Escape. */
+  function exitOrderReviewToMat(): void {
+    if (state.mode !== 'review') return;
+    dispatch(cancelOrderReview(state));
+    narrate('Back on the cutting mat.');
+  }
+
+  /** Assemble button / shortcut: open the review, narrate what's ahead. */
+  function enterOrderReview(): void {
+    if (state.mode !== 'mat') return;
+    dispatch(beginOrderReview(state));
+    const rows = orderReviewRows(state.project);
+    narrate(
+      rows.length > 0
+        ? orderReviewMessage(
+            state.project.name,
+            rows.length,
+            state.project.assembly[0]?.name,
+          )
+        : orderReviewEmptyMessage(state.project.name),
+    );
+  }
+
+  /** One render authority for the review: mount it or drop it. */
+  function syncOrderReviewSurface(): void {
+    if (state.mode === 'review') {
+      if (orderReviewHandle === null) mountOrderReviewSurface();
+    } else {
+      disposeOrderReviewSurface();
+    }
+  }
+
   // Narration and selection share the status bar: the latest event wins.
   // The tone dresses the pill (error/success) so outcomes read at a glance.
   // Copy renders through the glossary annotator: terms chip on first use
@@ -618,9 +699,10 @@ export function mountApp(root: HTMLElement): void {
     applyAppState(result, {
       onProjectReplaced: (project) => mountProject(project),
       onModeChanged: (mode) => {
-        // Entry suspends the persistence controls (UX-08); assembly keeps
-        // them live exactly as before — only Assemble had a mode gate.
-        setToolbarEnabled(mode !== 'entry');
+        // Entry and the review suspend the persistence controls while they
+        // hold the stage (UX-08, UX-10); assembly keeps them live exactly
+        // as before — only Assemble had a mode gate.
+        setToolbarEnabled(mode !== 'entry' && mode !== 'review');
         if (assembleButton) assembleButton.disabled = mode !== 'mat';
         // Exit-to-mat rebuilds the mat; a project replacement mounted it
         // already.
@@ -664,8 +746,10 @@ export function mountApp(root: HTMLElement): void {
         legendHandle?.updateFabric(spec);
       },
     });
-    // The entry surface follows the model: mount, mirror, or drop (UX-08).
+    // The entry surface follows the model: mount, mirror, or drop (UX-08) —
+    // and the review after it (UX-10).
     syncEntrySurface();
+    syncOrderReviewSurface();
   };
 
   // Taps on the mat and clicks in the piece list route through the model:
@@ -714,8 +798,9 @@ export function mountApp(root: HTMLElement): void {
     { alwaysEnabled: true },
   );
 
-  // Mode entry: the Assemble button hands the stage to the fold walkthrough.
-  assembleButton = addButton('Assemble', tryEnterAssembly);
+  // Mode entry (UX-10): the Assemble button opens the order review — the
+  // walkthrough starts from the review's Start stitching action.
+  assembleButton = addButton('Assemble', enterOrderReview);
 
   // Camera refit: the tap equivalent of the F shortcut. Built once; the
   // mode transitions below decide when it has a viewport to act on.
@@ -857,10 +942,11 @@ export function mountApp(root: HTMLElement): void {
         viewport?.refit();
         break;
       case 'assemble':
-        tryEnterAssembly();
+        enterOrderReview();
         break;
       case 'exit-or-deselect':
         if (state.mode === 'assembly') exitAssemblyToMat();
+        else if (state.mode === 'review') exitOrderReviewToMat();
         else dispatch(selectPiece(state, null));
         break;
       case 'show-shortcuts':
@@ -872,6 +958,7 @@ export function mountApp(root: HTMLElement): void {
   window.addEventListener('pagehide', () => {
     unsubscribe?.();
     disposeEntrySurface();
+    disposeOrderReviewSurface();
     fabricHandle?.dispose();
     measurementsHandle?.dispose();
     panelHandle?.dispose();

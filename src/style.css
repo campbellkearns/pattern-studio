@@ -1047,3 +1047,62 @@ button:active:not(:disabled) {
   outline: 2px solid var(--primary);
   outline-offset: 1px;
 }
+
+/* --- Order review (UX-10): the order, reviewable before starting ---------- */
+/* The review overlays the workspace exactly like the entry flow (opaque
+   paper, scrollable, no scene behind it); the list reads straight off
+   project.assembly. Buttons reuse the entry-btn classes — same stage, same
+   touch targets. No new colors: paper, ink, primary, and line tokens only. */
+
+.order-review {
+  position: absolute;
+  inset: 0;
+  z-index: 200; /* above the workspace surfaces; below the glossary popover */
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+}
+
+.order-review > * {
+  width: 100%;
+  max-width: 560px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.order-review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.order-review-step {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  min-height: 44px; /* touch-target baseline: tablet at the cutting table */
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  font-size: 1rem;
+}
+
+.order-review-note {
+  color: var(--ink-dim);
+}
+
+.order-review-empty {
+  padding: 12px;
+  color: var(--ink-dim);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+}
