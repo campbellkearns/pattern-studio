@@ -110,6 +110,15 @@ export interface AssemblyView {
    * that seam is the active one.
    */
   applySeamDesign(stepIndex: number, step: SeamStep): void;
+  /** Dev/dogfood aid: live state of the UX-12 accent line. */
+  seamAccentDebug(): {
+    visible: boolean;
+    pointCount: number;
+    color: string;
+    positionY: number;
+    bboxMin: { x: number; y: number; z: number } | null;
+    bboxMax: { x: number; y: number; z: number } | null;
+  };
   /** Dev/dogfood aid: each piece's centre in client coordinates. */
   pieceScreenPositions(): Array<{ id: string; x: number; y: number }>;
   dispose(): void;
@@ -336,6 +345,29 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
     }
   };
 
+  /** Dev/dogfood aid: live state of the UX-12 accent line. */
+  const seamAccentDebug = (): {
+    visible: boolean;
+    pointCount: number;
+    color: string;
+    positionY: number;
+    bboxMin: { x: number; y: number; z: number } | null;
+    bboxMax: { x: number; y: number; z: number } | null;
+  } => {
+    const geometry = seamLine.geometry;
+    geometry.computeBoundingBox();
+    const bbox = geometry.boundingBox;
+    const material = seamLine.material as LineBasicMaterial;
+    return {
+      visible: seamLine.visible,
+      pointCount: geometry.attributes.position?.count ?? 0,
+      color: `#${material.color.getHexString()}`,
+      positionY: seamLine.position.y,
+      bboxMin: bbox ? { x: bbox.min.x, y: bbox.min.y, z: bbox.min.z } : null,
+      bboxMax: bbox ? { x: bbox.max.x, y: bbox.max.y, z: bbox.max.z } : null,
+    };
+  };
+
   // --- Scrub application ----------------------------------------------------
   const setScrub = (stepIndex: number, t: number): void => {
     const poses = evaluateAssemblyPose(plan, stepIndex, t);
@@ -513,6 +545,7 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
     preFrameSeam,
     applyFabric,
     applySeamDesign,
+    seamAccentDebug,
     pieceScreenPositions,
     dispose,
   };

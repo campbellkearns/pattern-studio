@@ -103,6 +103,14 @@ declare global {
   interface Window {
     __patternStudioDebug?: {
       pieceScreenPositions: () => Array<{ id: string; x: number; y: number }>;
+      seamAccentDebug: () => {
+        visible: boolean;
+        pointCount: number;
+        color: string;
+        positionY: number;
+        bboxMin: { x: number; y: number; z: number } | null;
+        bboxMax: { x: number; y: number; z: number } | null;
+      } | null;
     };
   }
 }
@@ -967,6 +975,7 @@ export function mountApp(root: HTMLElement): void {
         assemblyView
           ? assemblyView.pieceScreenPositions()
           : (viewport?.pieceScreenPositions() ?? []),
+      seamAccentDebug: () => assemblyView?.seamAccentDebug() ?? null,
     };
   }
 
