@@ -88,3 +88,62 @@ describe('createSeamStep', () => {
     );
   });
 });
+
+describe('SeamStep stitch + thread color (UX-12)', () => {
+  it('accepts every curated stitch type', () => {
+    for (const stitch of ['straight', 'zigzag', 'backstitch'] as const) {
+      const step = createSeamStep(sideSeam({ stitch }));
+      expect(step.stitch).toBe(stitch);
+    }
+  });
+
+  it('rejects unknown stitch types', () => {
+    expect(() =>
+      createSeamStep(sideSeam({ stitch: 'overlock' as never })),
+    ).toThrow(/must be one of/);
+    expect(() =>
+      createSeamStep(sideSeam({ stitch: 'Zigzag' as never })),
+    ).toThrow(/must be one of/); // case-sensitive, like every other enum
+  });
+
+  it('accepts hex thread colors by the fabric rule (#rgb and #rrggbb)', () => {
+    expect(
+      createSeamStep(sideSeam({ threadColor: '#f0f' })).threadColor,
+    ).toBe('#f0f');
+    expect(
+      createSeamStep(sideSeam({ threadColor: '#C0553B' })).threadColor,
+    ).toBe('#C0553B');
+  });
+
+  it('rejects non-hex thread colors', () => {
+    for (const bad of ['red', '#ff', '#12345', '123456', '#a1b2g3', '']) {
+      expect(() => createSeamStep(sideSeam({ threadColor: bad }))).toThrow(
+        /hex string/,
+      );
+    }
+  });
+
+  it('keeps absent design fields undefined so pre-wave data parses unchanged', () => {
+    const step = createSeamStep(sideSeam());
+    expect(step.stitch).toBeUndefined();
+    expect(step.threadColor).toBeUndefined();
+  });
+
+  it('freezes the step and its design fields', () => {
+    const step = createSeamStep(
+      sideSeam({ stitch: 'zigzag', threadColor: '#105B43' }),
+    );
+    expect(Object.isFrozen(step)).toBe(true);
+    expect(() => {
+      (step as { stitch?: string }).stitch = 'straight';
+    }).toThrow();
+  });
+
+  it('round-trips a serialized step with design fields through JSON', () => {
+    const step = createSeamStep(
+      sideSeam({ stitch: 'backstitch', threadColor: '#1A40B0' }),
+    );
+    const parsed = createSeamStep(JSON.parse(JSON.stringify(step)));
+    expect(parsed).toEqual(step);
+  });
+});

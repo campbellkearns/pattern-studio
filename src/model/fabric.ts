@@ -28,21 +28,31 @@ export interface FabricSpec {
 const WEAVE_TYPES: readonly WeaveType[] = ['plain', 'twill', 'satin'];
 const HEX_COLOR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 
+/**
+ * The hex rule every color field in the model shares (`#rgb` or `#rrggbb`).
+ * UX-12 reuses it for thread colors so a swatch is valid everywhere or
+ * nowhere — one rule, not two callers' worth of drift.
+ */
+export function requireHexColor(color: string, label = 'fabric color'): string {
+  if (!HEX_COLOR.test(color)) {
+    throw new Error(
+      `${label} must be a hex string like "#a1b2c3", got "${color}"`,
+    );
+  }
+  return color;
+}
+
 export function createFabricSpec(input: FabricSpec): FabricSpec {
   if (!WEAVE_TYPES.includes(input.weave)) {
     throw new Error(
       `fabric weave must be one of ${WEAVE_TYPES.join(' | ')}, got "${String(input.weave)}"`,
     );
   }
-  if (!HEX_COLOR.test(input.color)) {
-    throw new Error(
-      `fabric color must be a hex string like "#a1b2c3", got "${input.color}"`,
-    );
-  }
+  const color = requireHexColor(input.color);
   return Object.freeze({
     weave: input.weave,
     weaveScale: requirePositive(input.weaveScale, 'fabric weaveScale'),
-    color: input.color,
+    color,
     weight: requirePositive(input.weight, 'fabric weight'),
     // Additive optional parameter: only validated when present.
     stripeCm:

@@ -234,3 +234,80 @@ describe('localStorage storage', () => {
     expect(loaded.reason).toMatch(/non-empty/);
   });
 });
+
+describe('pre-wave backward compatibility (UX-12)', () => {
+  /** A save written before the stitch/thread design layer existed: no
+   * stitch or threadColor keys anywhere. Pre-wave saves must keep parsing
+   * to the same project, with the design fields simply absent. */
+  const PRE_WAVE_SAVE = JSON.stringify({
+    id: 'proj-1',
+    name: 'Shirt',
+    measurements: { chest: 96 },
+    fabric: {
+      weave: 'plain',
+      weaveScale: 0.12,
+      color: '#5b7553',
+      weight: 340,
+    },
+    pieces: [
+      {
+        id: 'front',
+        name: 'Front piece',
+        outline: [
+          { type: 'M', point: { x: 0, y: 0 } },
+          { type: 'L', point: { x: 10, y: 0 } },
+          { type: 'L', point: { x: 10, y: 10 } },
+          { type: 'L', point: { x: 0, y: 10 } },
+          { type: 'Z' },
+        ],
+        internal: [],
+        grainline: { angle: 0, placement: { x: 5, y: 5 } },
+        seamAllowance: 1.5,
+        cutCount: 1,
+      },
+      {
+        id: 'back',
+        name: 'Back piece',
+        outline: [
+          { type: 'M', point: { x: 0, y: 0 } },
+          { type: 'L', point: { x: 10, y: 0 } },
+          { type: 'L', point: { x: 10, y: 10 } },
+          { type: 'L', point: { x: 0, y: 10 } },
+          { type: 'Z' },
+        ],
+        internal: [],
+        grainline: { angle: 0, placement: { x: 5, y: 5 } },
+        seamAllowance: 1.5,
+        cutCount: 1,
+      },
+    ],
+    assembly: [
+      {
+        pieces: ['front', 'back'],
+        edges: [
+          { pieceId: 'front', startVertex: 0, edgeCount: 1 },
+          { pieceId: 'back', startVertex: 0, edgeCount: 1 },
+        ],
+        order: 1,
+        note: 'Sew the top edge.',
+      },
+    ],
+  });
+
+  it('parses a pre-wave save with the design fields absent, not defaulted', () => {
+    const parsed = parseProject(PRE_WAVE_SAVE);
+    expect(parsed.status).toBe('ok');
+    if (parsed.status !== 'ok') return;
+    const step = parsed.project.assembly[0]!;
+    expect(step.stitch).toBeUndefined();
+    expect(step.threadColor).toBeUndefined();
+  });
+
+  it('re-serializes a pre-wave save without inventing design keys', () => {
+    const parsed = parseProject(PRE_WAVE_SAVE);
+    if (parsed.status !== 'ok') throw new Error('expected a valid parse');
+    expect(JSON.parse(serializeProject(parsed.project))).toEqual(
+      JSON.parse(PRE_WAVE_SAVE),
+    );
+  });
+});

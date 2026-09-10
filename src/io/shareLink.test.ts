@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createPiece, type Piece } from '../model/piece';
 import { closePath, cubicTo, lineTo, moveTo } from '../model/path';
 import { createProject, type Project } from '../model/project';
+import { createSeamStep } from '../model/seam';
 import { vec2 } from '../model/vec2';
 import { serializeProject } from './projectIo';
 import {
@@ -55,6 +56,29 @@ describe('share tokens', () => {
     expect(parsed.status).toBe('ok');
     if (parsed.status !== 'ok') return;
     expect(parsed.project).toEqual(original);
+  });
+
+  it('round-trips a pre-wave project (no stitch/thread fields) with the fields absent (UX-12)', () => {
+    const preWave = sampleProject({
+      pieces: [samplePiece('body'), samplePiece('lining')],
+      assembly: [
+        createSeamStep({
+          pieces: ['body', 'lining'],
+          edges: [
+            { pieceId: 'body', startVertex: 0, edgeCount: 1 },
+            { pieceId: 'lining', startVertex: 0, edgeCount: 1 },
+          ],
+          order: 1,
+          note: 'Join body to lining.',
+        }),
+      ],
+    });
+    const parsed = decodeProjectToken(encodeProjectToken(preWave));
+    expect(parsed.status).toBe('ok');
+    if (parsed.status !== 'ok') return;
+    const step = parsed.project.assembly[0]!;
+    expect(step.stitch).toBeUndefined();
+    expect(step.threadColor).toBeUndefined();
   });
 
   it('round-trips unicode names through UTF-8 base64url', () => {
