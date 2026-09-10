@@ -956,3 +956,94 @@ button:active:not(:disabled) {
     transition: none;
   }
 }
+
+/* --- Entry flow (UX-08): fabric-first first-session surface ---------------- */
+/* The flow overlays the workspace while it holds the stage: opaque paper so
+   no half-mounted scene reads through, scrollable for short viewports. The
+   fabric panel keeps its own styles; only the surrounding flow is styled
+   here. No new colors — paper, ink, primary, and line tokens only. */
+
+.app-layout {
+  position: relative; /* the entry flow overlays the workspace */
+}
+
+.entry-flow {
+  position: absolute;
+  inset: 0;
+  z-index: 200; /* above the workspace surfaces; below the glossary popover */
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+}
+
+.entry-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.entry-copy {
+  color: var(--ink-dim);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.entry-fabric-host {
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+}
+
+.entry-project-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.entry-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.entry-btn {
+  min-height: 44px; /* touch-target baseline: tablet at the cutting table */
+  padding: 8px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.entry-btn:hover:not(:disabled),
+.entry-btn:focus-visible {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.entry-btn-primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+}
+
+.entry-btn-primary:hover:not(:disabled),
+.entry-btn-primary:focus-visible {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.entry-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
