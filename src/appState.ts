@@ -19,6 +19,10 @@
  *   id clears it rather than leaving a ghost selection behind.
  * - `mode` owns which scene holds the canvas; the Assemble button state and
  *   scene teardown derive from it instead of being poked independently.
+ * - `entry` (UX-08) carries the fabric-first flow's substate while mode is
+ *   'entry' — which choice the surface shows and the fabric committed so
+ *   far. It is null in every other mode, so a landed or cancelled flow can
+ *   never leak stale entry data into mat/assembly.
  *
  * The status bar derives from state in mat mode (statusText) and stays
  * event-driven in assembly mode, where narrations like "Seam 2 of 5" are
@@ -26,15 +30,31 @@
  */
 
 import type { FabricSpec, Piece, Project, SeamStep } from './model';
+import { curatedBlankProject, CURATED_BLANK_ID } from './data/curatedBlank';
+import { starterById } from './data/starters';
 
-/** Which scene currently owns the canvas. */
-export type AppMode = 'mat' | 'assembly';
+/** Which scene currently owns the canvas. 'entry' (UX-08) is the fabric-first setup flow — no scene, DOM only. */
+export type AppMode = 'entry' | 'mat' | 'assembly';
+
+/**
+ * The entry flow's substate (UX-08), present exactly while mode is 'entry'.
+ * Fabric choice leads (the PRD's fabric-first principle); the committed
+ * fabric is applied to the chosen project when the flow lands on the mat.
+ */
+export interface EntryState {
+  /** Which choice the surface shows: fabric first, then project. */
+  readonly step: 'fabric' | 'project';
+  /** Fabric committed at the fabric step; applied to the project on landing. */
+  readonly fabric?: FabricSpec;
+}
 
 export interface AppState {
   readonly project: Project;
   readonly mode: AppMode;
   /** Selected piece id — always null in assembly mode, always a live piece id. */
   readonly selectedId: string | null;
+  /** Entry-flow substate; defined only while mode is 'entry'. */
+  readonly entry: EntryState | null;
 }
 
 /** One transition step: the next state plus the effects needed to render it. */
@@ -70,7 +90,17 @@ export const NO_EFFECTS: AppStateEffects = {
 };
 
 export function initialAppState(project: Project): AppState {
-  return { project, mode: 'mat', selectedId: null };
+  return { project, mode: 'mat', selectedId: null, entry: null };
+}
+
+/**
+ * First-session cold start (UX-08): no share link and no save resolved, so
+ * the session opens in the entry flow at the fabric step. The project is
+ * the starter that would have mounted — it stays the honest "what is on
+ * the table" fallback should the user cancel the flow.
+ */
+export function initialEntryState(project: Project): AppState {
+  return { project, mode: 'entry', selectedId: null, entry: { step: 'fabric' } };
 }
 
 /** Mat-surface taps and panel clicks land here through the selection proxy. */
@@ -90,7 +120,7 @@ export function selectPiece(state: AppState, id: string | null): TransitionResul
 export function enterAssembly(state: AppState): TransitionResult {
   if (state.mode === 'assembly') return { state, effects: NO_EFFECTS };
   return {
-    state: { ...state, mode: 'assembly', selectedId: null },
+    state: { ...state, mode: 'assembly', selectedId: null, entry: null },
     effects: {
       ...NO_EFFECTS,
       modeChanged: 'assembly',
@@ -100,10 +130,11 @@ export function enterAssembly(state: AppState): TransitionResult {
 }
 
 export function exitAssembly(state: AppState): TransitionResult {
-  if (state.mode === 'mat') return { state, effects: NO_EFFECTS };
+  // Only assembly exits here: leaving the entry flow is cancelEntry's job.
+  if (state.mode !== 'assembly') return { state, effects: NO_EFFECTS };
   // Selection stays null: leaving the walkthrough lands on an unselected mat.
   return {
-    state: { ...state, mode: 'mat' },
+    state: { ...state, mode: 'mat', entry: null },
     effects: { ...NO_EFFECTS, modeChanged: 'mat' },
   };
 }
@@ -111,7 +142,7 @@ export function exitAssembly(state: AppState): TransitionResult {
 /** Starter switch, Load, Import JSON, and shared links all land here. */
 export function switchProject(state: AppState, project: Project): TransitionResult {
   return {
-    state: { project, mode: 'mat', selectedId: null },
+    state: { project, mode: 'mat', selectedId: null, entry: null },
     effects: {
       ...NO_EFFECTS,
       projectReplaced: project,
@@ -132,6 +163,130 @@ export function applyFabric(state: AppState, spec: FabricSpec): TransitionResult
     state: { ...state, project: { ...state.project, fabric: spec } },
     effects: { ...NO_EFFECTS, fabricApplied: spec },
   };
+}
+
+/**
+ * UX-08 — the fabric-first entry flow's transitions. The flow is a mode,
+ * not an overlay bug: every choice below is a pure transition whose effects
+ * ride the same five slots as everything else, so the shell keeps its one
+ * dispatch path and never writes a surface directly. The flow always starts
+ * at the fabric step (fabric first is the PRD's principle, not a default to
+ * skip), and every step keeps a back path — no dead ends.
+ */
+
+/**
+ * (Re-)enter the flow at the fabric step: the New action from the mat, and
+ * the project step's back path. A fabric already chosen in this flow is
+ * kept — back must not make the user re-pick it — while entering from
+ * outside the flow (New) starts with none, since entry state is null there.
+ * Idempotent when already at the fabric step.
+ */
+export function beginEntry(state: AppState): TransitionResult {
+  if (state.mode === 'entry' && state.entry?.step === 'fabric') {
+    return { state, effects: NO_EFFECTS };
+  }
+  const entry: EntryState =
+    state.entry?.fabric !== undefined
+      ? { step: 'fabric', fabric: state.entry.fabric }
+      : { step: 'fabric' };
+  return {
+    state: { ...state, mode: 'entry', selectedId: null, entry },
+    effects: {
+      ...NO_EFFECTS,
+      modeChanged: 'entry',
+      selection: { id: null },
+    },
+  };
+}
+
+/**
+ * Commit the fabric choice and advance to the project step. The spec is
+ * stored on the entry substate, not written to a project — nothing is on
+ * the mat yet; chooseEntryProject applies it on landing.
+ */
+export function chooseEntryFabric(
+  state: AppState,
+  spec: FabricSpec,
+): TransitionResult {
+  if (state.mode !== 'entry' || state.entry === null) {
+    return { state, effects: NO_EFFECTS };
+  }
+  return {
+    state: { ...state, entry: { step: 'project', fabric: spec } },
+    effects: NO_EFFECTS,
+  };
+}
+
+/**
+ * Land on the mat with the chosen project and the entry fabric applied
+ * (the user's fabric choice wins over the starter's curated one). Unknown
+ * ids are a no-op rather than a crash: the view only emits ids this module
+ * knows, but the model stays total. Curated blank lands with zero pieces —
+ * the mat's panels carry their own empty states, so it is a workspace,
+ * never a void.
+ */
+export function chooseEntryProject(
+  state: AppState,
+  id: string,
+): TransitionResult {
+  if (state.mode !== 'entry' || state.entry === null) {
+    return { state, effects: NO_EFFECTS };
+  }
+  const built =
+    id === CURATED_BLANK_ID
+      ? curatedBlankProject()
+      : starterById(id)?.build();
+  if (built === undefined) return { state, effects: NO_EFFECTS };
+  const project: Project =
+    state.entry.fabric !== undefined
+      ? { ...built, fabric: state.entry.fabric }
+      : built;
+  return {
+    state: { project, mode: 'mat', selectedId: null, entry: null },
+    effects: {
+      ...NO_EFFECTS,
+      projectReplaced: project,
+      modeChanged: 'mat',
+      selection: { id: null },
+    },
+  };
+}
+
+/** Leave the flow: back to the project that was on the mat before. */
+export function cancelEntry(state: AppState): TransitionResult {
+  if (state.mode !== 'entry') return { state, effects: NO_EFFECTS };
+  return {
+    state: { ...state, mode: 'mat', entry: null },
+    effects: { ...NO_EFFECTS, modeChanged: 'mat' },
+  };
+}
+
+/**
+ * Entry-flow narration (UX-08): every step narrates on entry and exit —
+ * the never-swallow discipline is the no-dead-ends guard. Pure builders,
+ * interpolated at the call site (app.ts) so the copy audit covers their
+ * real shape, matching the assemblyEntryMessage precedent.
+ */
+export function entryFabricStepMessage(): string {
+  return 'Fabric first — pick your cloth; every piece re-skins to match.';
+}
+
+export function entryProjectStepMessage(): string {
+  return 'Fabric chosen — now pick what to make.';
+}
+
+export function entryLandedMessage(
+  projectName: string,
+  learnCard?: string,
+): string {
+  const landed = `'${projectName}' is on the mat with your fabric.`;
+  return learnCard
+    ? `${landed} ${learnCard}`
+    : `${landed} Press Assemble to walk the seams when you're ready.`;
+}
+
+export function cancelEntryMessage(projectName: string): string {
+  return `Back on the cutting mat — '${projectName}' is on the table.`;
 }
 
 /**
