@@ -10,9 +10,19 @@ import type { FabricSpec, Piece, Project } from './model';
 import {
   applyAppState,
   applyFabric,
+  assemblyEntryMessage,
+  beginEntry,
+  cancelEntry,
+  cancelEntryMessage,
+  chooseEntryFabric,
+  chooseEntryProject,
   enterAssembly,
+  entryFabricStepMessage,
+  entryLandedMessage,
+  entryProjectStepMessage,
   exitAssembly,
   initialAppState,
+  initialEntryState,
   mirrorSelection,
   NOTHING_SELECTED_MESSAGE,
   redraftPieces,
@@ -20,6 +30,7 @@ import {
   statusText,
   switchProject,
 } from './appState';
+import { CURATED_BLANK_ID } from './data/curatedBlank';
 import type { AppState, AppStateHandlers, TransitionResult } from './appState';
 
 const buildStarter = (id: string): Project => {
@@ -253,6 +264,143 @@ describe('app state: scripted sweep (select → assemble → undo → switch →
     expect(state.project.fabric.color).toBe('#2468ac');
     expect(state.selectedId).toBeNull();
     expect(state.mode).toBe('mat');
+  });
+});
+
+describe('app state: entry mode (UX-08)', () => {
+  it('initialEntryState opens the flow at the fabric step', () => {
+    const state = initialEntryState(notebook());
+    expect(state.mode).toBe('entry');
+    expect(state.entry).toEqual({ step: 'fabric' });
+    expect(state.selectedId).toBeNull();
+  });
+
+  it('beginEntry leaves the mat for the fabric step and clears selection', () => {
+    const project = notebook();
+    const base = run(selectPiece(initialAppState(project), project.pieces[0]!.id));
+    const result = beginEntry(base);
+    expect(result.state.mode).toBe('entry');
+    expect(result.state.entry).toEqual({ step: 'fabric' });
+    expect(result.state.selectedId).toBeNull();
+    expect(result.state.project).toBe(project); // cancel lands back here
+    expect(result.effects.modeChanged).toBe('entry');
+    expect(result.effects.selection).toEqual({ id: null });
+  });
+
+  it('beginEntry is idempotent while already at the fabric step', () => {
+    const base = initialEntryState(notebook());
+    const result = beginEntry(base);
+    expect(result.state).toBe(base);
+    expect(result.effects.modeChanged).toBeNull();
+  });
+
+  it('the project step’s back path re-enters at fabric with the fabric kept', () => {
+    const base = initialEntryState(notebook());
+    const spec = fabricIn(notebook(), '#123456');
+    const atProject = run(chooseEntryFabric(base, spec));
+    const back = beginEntry(atProject);
+    expect(back.state.mode).toBe('entry');
+    expect(back.state.entry).toEqual({ step: 'fabric', fabric: spec });
+  });
+
+  it('chooseEntryFabric commits the fabric and advances to the project step', () => {
+    const base = initialEntryState(notebook());
+    const spec = fabricIn(notebook(), '#abcdef');
+    const result = chooseEntryFabric(base, spec);
+    expect(result.state.entry).toEqual({ step: 'project', fabric: spec });
+    // Nothing is on the mat yet — the project's own fabric is untouched.
+    expect(result.state.project.fabric).toBe(base.project.fabric);
+  });
+
+  it('chooseEntryFabric is a no-op outside the entry flow', () => {
+    const base = initialAppState(notebook());
+    const result = chooseEntryFabric(base, fabricIn(notebook(), '#abcdef'));
+    expect(result.state).toBe(base);
+    expect(result.effects.modeChanged).toBeNull();
+  });
+
+  it('chooseEntryProject lands on the mat with the entry fabric applied', () => {
+    const base = initialEntryState(notebook());
+    const spec = fabricIn(notebook(), '#2468ac');
+    const atProject = run(chooseEntryFabric(base, spec));
+    const result = chooseEntryProject(atProject, 'starter-tote');
+    expect(result.state.mode).toBe('mat');
+    expect(result.state.entry).toBeNull();
+    expect(result.state.selectedId).toBeNull();
+    expect(result.state.project.id).toBe('starter-tote');
+    expect(result.state.project.fabric.color).toBe('#2468ac'); // user fabric wins
+    expect(result.effects.projectReplaced).toBe(result.state.project);
+    expect(result.effects.modeChanged).toBe('mat');
+  });
+
+  it('chooseEntryProject keeps the starter’s curated fabric when none was chosen', () => {
+    const base = initialEntryState(notebook());
+    // Defensive: the flow only reaches the project step through the fabric
+    // step, but the transition stays total for a direct call.
+    const atProject = { ...base, entry: { step: 'project' as const } };
+    const result = chooseEntryProject(atProject, 'starter-tote');
+    // Value comparison: every build re-validates through createFabricSpec,
+    // so two builds never share a fabric object identity.
+    expect(result.state.project.fabric).toEqual(
+      STARTERS.find((s) => s.id === 'starter-tote')!.build().fabric,
+    );
+  });
+
+  it('chooseEntryProject lands the curated blank with zero pieces', () => {
+    const base = initialEntryState(notebook());
+    const atProject = run(chooseEntryFabric(base, fabricIn(notebook(), '#2468ac')));
+    const result = chooseEntryProject(atProject, CURATED_BLANK_ID);
+    expect(result.state.mode).toBe('mat');
+    expect(result.state.project.id).toBe(CURATED_BLANK_ID);
+    expect(result.state.project.pieces).toHaveLength(0);
+    expect(result.state.project.assembly).toHaveLength(0);
+    expect(result.state.project.fabric.color).toBe('#2468ac');
+  });
+
+  it('chooseEntryProject ignores an unknown project id', () => {
+    const base = initialEntryState(notebook());
+    const result = chooseEntryProject(base, 'starter-nope');
+    expect(result.state).toBe(base);
+    expect(result.effects.projectReplaced).toBeNull();
+  });
+
+  it('cancelEntry returns to the mat with the pre-flow project intact', () => {
+    const project = notebook();
+    const base = beginEntry(initialAppState(project)).state;
+    const result = cancelEntry(base);
+    expect(result.state.mode).toBe('mat');
+    expect(result.state.entry).toBeNull();
+    expect(result.state.project).toBe(project);
+    expect(result.effects.modeChanged).toBe('mat');
+  });
+
+  it('cancelEntry is a no-op outside the entry flow', () => {
+    const base = initialAppState(notebook());
+    const result = cancelEntry(base);
+    expect(result.state).toBe(base);
+    expect(result.effects.modeChanged).toBeNull();
+  });
+
+  it('landing applies project replacement before mode change before selection', () => {
+    const base = initialEntryState(notebook());
+    const atProject = run(chooseEntryFabric(base, fabricIn(notebook(), '#2468ac')));
+    const { calls, handlers } = recorder();
+    applyAppState(chooseEntryProject(atProject, 'starter-tote'), handlers);
+    expect(calls).toEqual(['project:starter-tote', 'mode:mat', 'select:none']);
+  });
+
+  it('narrates on entry and exit of every step', () => {
+    expect(entryFabricStepMessage()).toMatch(/Fabric first/i);
+    expect(entryProjectStepMessage()).toMatch(/fabric chosen/i);
+    expect(entryLandedMessage('Tote')).toMatch(/'Tote' is on the mat/);
+    expect(entryLandedMessage('Tote', 'You will learn felling.')).toBe(
+      `'Tote' is on the mat with your fabric. You will learn felling.`,
+    );
+    expect(cancelEntryMessage('Notebook holder')).toBe(
+      `Back on the cutting mat — 'Notebook holder' is on the table.`,
+    );
+    // The existing assembly-entry narration keeps its shape.
+    expect(assemblyEntryMessage(2, 'Flap seam')).toMatch(/2 seams/);
   });
 });
 

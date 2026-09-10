@@ -14,7 +14,8 @@
  * remounts and Save/Export/Share keep them), and redrafts re-plan the
  * assembly walkthrough instead of silently desyncing it.
  */
-import { starterById, STARTERS } from './data/starters';
+import { starterById, STARTERS, isStarterProject } from './data/starters';
+import { CURATED_BLANK_ID } from './data/curatedBlank';
 import { EMPTY_PARAMETERS } from './model';
 import type { Project } from './model';
 import {
@@ -61,9 +62,18 @@ import {
   applyAppState,
   applyFabric,
   assemblyEntryMessage,
+  beginEntry,
+  cancelEntry,
+  cancelEntryMessage,
+  chooseEntryFabric,
+  chooseEntryProject,
   enterAssembly,
+  entryFabricStepMessage,
+  entryLandedMessage,
+  entryProjectStepMessage,
   exitAssembly,
   initialAppState,
+  initialEntryState,
   mirrorSelection,
   NOTHING_SELECTED_MESSAGE,
   redraftPieces,
@@ -72,6 +82,8 @@ import {
   switchProject,
 } from './appState';
 import type { AppState, TransitionResult } from './appState';
+import { createEntryFlow } from './view/entryFlow';
+import type { EntryFlowHandle } from './view/entryFlow';
 import { createViewport } from './view/viewport';
 import type { Viewport } from './view/viewport';
 
@@ -116,10 +128,17 @@ function slugify(name: string): string {
 /**
  * Cold-start project: a shared link wins (the hash is consumed after load so
  * a plain reload doesn't replay the link over later saves), then the project
- * saved in this browser, then the starter. Anything invalid is narrated, not
- * dropped — a broken link or corrupted save must say so.
+ * saved in this browser, then — only when neither resolves, the first-ever
+ * session (UX-08) — the fabric-first entry flow. Anything invalid is
+ * narrated, not dropped — a broken link or corrupted save must say so.
+ * Returning-user precedence is untouched: a resolved share link or save
+ * opens on the mat exactly as before.
  */
-function loadStartupProject(): { project: Project; message: string } {
+function loadStartupProject(): {
+  project: Project;
+  message: string;
+  startInEntry: boolean;
+} {
   const starter = STARTERS[0].build();
 
   const token = readShareToken(window.location.hash);
@@ -134,11 +153,13 @@ function loadStartupProject(): { project: Project; message: string } {
       return {
         project: parsed.project,
         message: `Loaded '${parsed.project.name}' from the shared link.`,
+        startInEntry: false,
       };
     }
     return {
       project: starter,
       message: `The shared link held an invalid project (${parsed.reason}) — showing the starter instead.`,
+      startInEntry: false,
     };
   }
 
@@ -147,18 +168,19 @@ function loadStartupProject(): { project: Project; message: string } {
     return {
       project: saved.project,
       message: `Restored '${saved.project.name}' from this browser.`,
+      startInEntry: false,
     };
   }
   if (saved.status === 'invalid') {
     return {
       project: starter,
       message: `Saved project was invalid (${saved.reason}) — showing the starter.`,
+      startInEntry: false,
     };
   }
-  return {
-    project: starter,
-    message: `Showing the starter: '${starter.name}'.`,
-  };
+  // First-ever session: no link, no save — the entry flow holds the stage
+  // (the starter stays the honest fallback project if the flow is cancelled).
+  return { project: starter, message: '', startInEntry: true };
 }
 
 export function mountApp(root: HTMLElement): void {
@@ -244,7 +266,11 @@ export function mountApp(root: HTMLElement): void {
   // it, and their taps route through the matSelection proxy below, so the
   // state model stays the only writer.
   const selection = createSelectionStore();
-  let state: AppState = initialAppState(startup.project);
+  // UX-08: a first session opens in the entry flow (no mat scene mounted);
+  // every other cold start opens on the mat as before.
+  let state: AppState = startup.startInEntry
+    ? initialEntryState(startup.project)
+    : initialAppState(startup.project);
   let viewport: Viewport | null = null;
   let assemblyView: AssemblyView | null = null;
   let assemblyControls: AssemblyControlsHandle | null = null;
@@ -255,6 +281,7 @@ export function mountApp(root: HTMLElement): void {
   let unsubscribe: (() => void) | null = null;
   let assembleButton: HTMLButtonElement | null = null;
   let refitButtonHandle: RefitButtonHandle | null = null;
+  let entryHandle: EntryFlowHandle | null = null;
 
   /** Swap the live project: tear the old views down, mount fresh ones. */
   const mountProject = (project: Project): void => {
@@ -448,7 +475,9 @@ export function mountApp(root: HTMLElement): void {
 
   /** Assemble button / shortcut: swap the mat for the walkthrough. */
   function tryEnterAssembly(): void {
-    if (state.mode === 'assembly') return;
+    // Entry is a mode, not a selection state: the walkthrough can only be
+    // requested from the mat (UX-08) — mirrors the button's disabled state.
+    if (state.mode !== 'mat') return;
     try {
       buildAssemblyScene();
     } catch (error) {
@@ -479,6 +508,79 @@ export function mountApp(root: HTMLElement): void {
     narrate('Back on the cutting mat.');
   }
 
+  // --- Entry flow (UX-08: fabric-first first-session surface) --------------
+  // The entry overlay is the flow's only DOM: it mounts when the model is in
+  // entry mode and mirrors the model's entry substate after every dispatch.
+  // The five effect slots carry no entry-step channel by design ("no new
+  // side channels"), so the flow's re-render reads state directly — a pure
+  // render from the model, never a write around it.
+
+  function disposeEntrySurface(): void {
+    entryHandle?.dispose();
+    entryHandle = null;
+  }
+
+  function mountEntrySurface(): void {
+    if (state.entry === null) return; // not enterable in mat/assembly modes
+    // The flow holds the stage: tear both scenes down so nothing renders or
+    // listens behind the overlay; the mat remounts when the flow ends.
+    disposeAssemblyScene();
+    panelHandle?.dispose();
+    panelHandle = null;
+    legendHandle?.dispose();
+    legendHandle = null;
+    fabricHandle?.dispose();
+    fabricHandle = null;
+    measurementsHandle?.dispose();
+    measurementsHandle = null;
+    viewport?.dispose();
+    viewport = null;
+    refitButtonHandle?.setEnabled(false);
+    entryHandle = createEntryFlow(layout, {
+      entry: state.entry,
+      seedFabric: state.project.fabric,
+      projects: [
+        ...STARTERS.map((starter) => ({ id: starter.id, name: starter.name })),
+        { id: CURATED_BLANK_ID, name: 'Curated blank' },
+      ],
+      callbacks: {
+        onFabricChosen: (spec) => {
+          dispatch(chooseEntryFabric(state, spec));
+          narrate(entryProjectStepMessage());
+        },
+        onProjectChosen: (id) => {
+          dispatch(chooseEntryProject(state, id));
+          narrate(
+            entryLandedMessage(
+              state.project.name,
+              isStarterProject(state.project)
+                ? state.project.learnCard
+                : undefined,
+            ),
+          );
+        },
+        onBackToFabric: () => {
+          dispatch(beginEntry(state));
+          narrate(entryFabricStepMessage());
+        },
+        onCancel: () => {
+          dispatch(cancelEntry(state));
+          narrate(cancelEntryMessage(state.project.name));
+        },
+      },
+    });
+  }
+
+  /** One render authority for the flow: mount, mirror, or drop it. */
+  function syncEntrySurface(): void {
+    if (state.mode === 'entry' && state.entry !== null) {
+      if (entryHandle === null) mountEntrySurface();
+      else entryHandle.render(state.entry);
+    } else {
+      disposeEntrySurface();
+    }
+  }
+
   // Narration and selection share the status bar: the latest event wins.
   // The tone dresses the pill (error/success) so outcomes read at a glance.
   // Copy renders through the glossary annotator: terms chip on first use
@@ -501,6 +603,14 @@ export function mountApp(root: HTMLElement): void {
     if (text !== null) narrate(text);
   });
 
+  // Entry-mode toolbar gating (UX-08): persistence controls suspend while
+  // the entry flow holds the stage; New stays live so the flow can be
+  // re-entered from anywhere.
+  const toolbarControls: HTMLButtonElement[] = [];
+  const setToolbarEnabled = (enabled: boolean): void => {
+    for (const control of toolbarControls) control.disabled = !enabled;
+  };
+
   // The one write path into the UI: apply a transition's effects in the
   // model's canonical order. Handlers stay dumb — they read the new state.
   const dispatch = (result: TransitionResult): void => {
@@ -508,7 +618,10 @@ export function mountApp(root: HTMLElement): void {
     applyAppState(result, {
       onProjectReplaced: (project) => mountProject(project),
       onModeChanged: (mode) => {
-        if (assembleButton) assembleButton.disabled = mode === 'assembly';
+        // Entry suspends the persistence controls (UX-08); assembly keeps
+        // them live exactly as before — only Assemble had a mode gate.
+        setToolbarEnabled(mode !== 'entry');
+        if (assembleButton) assembleButton.disabled = mode !== 'mat';
         // Exit-to-mat rebuilds the mat; a project replacement mounted it
         // already.
         if (mode === 'mat' && !viewport) mountProject(state.project);
@@ -551,6 +664,8 @@ export function mountApp(root: HTMLElement): void {
         legendHandle?.updateFabric(spec);
       },
     });
+    // The entry surface follows the model: mount, mirror, or drop (UX-08).
+    syncEntrySurface();
   };
 
   // Taps on the mat and clicks in the piece list route through the model:
@@ -561,19 +676,43 @@ export function mountApp(root: HTMLElement): void {
     subscribe: (listener) => selection.subscribe(listener),
   };
 
-  mountProject(startup.project);
-  narrate(startup.message);
+  if (startup.startInEntry) {
+    // UX-08 first session: the entry flow holds the stage — no WebGL runs
+    // before a project exists; narration names the fabric step.
+    syncEntrySurface();
+    narrate(entryFabricStepMessage());
+  } else {
+    mountProject(startup.project);
+    narrate(startup.message);
+  }
 
   // --- Toolbar (F7: projects as data) -------------------------------------
-  const addButton = (label: string, onClick: () => void): HTMLButtonElement => {
+  // Buttons register themselves unless flagged always-enabled: entry mode
+  // suspends the persistence controls but never the New action (UX-08).
+  const addButton = (
+    label: string,
+    onClick: () => void,
+    { alwaysEnabled = false }: { alwaysEnabled?: boolean } = {},
+  ): HTMLButtonElement => {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'toolbar-btn';
     button.textContent = label;
     button.addEventListener('click', onClick);
     actions.appendChild(button);
+    if (!alwaysEnabled) toolbarControls.push(button);
     return button;
   };
+
+  // UX-08: New re-enters the fabric-first flow from any mat state.
+  addButton(
+    'New',
+    () => {
+      dispatch(beginEntry(state));
+      narrate(entryFabricStepMessage());
+    },
+    { alwaysEnabled: true },
+  );
 
   // Mode entry: the Assemble button hands the stage to the fold walkthrough.
   assembleButton = addButton('Assemble', tryEnterAssembly);
@@ -680,6 +819,10 @@ export function mountApp(root: HTMLElement): void {
     })();
   });
 
+  // UX-08: a first session opens in the entry flow — the flow's stage means
+  // the persistence controls start suspended; mat cold starts start live.
+  setToolbarEnabled(state.mode === 'mat');
+
   // Dev-only dogfooding hook (stripped from production builds): lets the
   // automation aim taps at exact piece positions in either mode.
   if (import.meta.env.DEV) {
@@ -728,6 +871,7 @@ export function mountApp(root: HTMLElement): void {
 
   window.addEventListener('pagehide', () => {
     unsubscribe?.();
+    disposeEntrySurface();
     fabricHandle?.dispose();
     measurementsHandle?.dispose();
     panelHandle?.dispose();
