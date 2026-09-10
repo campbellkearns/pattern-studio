@@ -61,6 +61,7 @@ import type { SelectionStore } from './view/selection';
 import {
   applyAppState,
   applyFabric,
+  applySeamDesign,
   assemblyEntryMessage,
   beginEntry,
   beginOrderReview,
@@ -91,6 +92,8 @@ import { createEntryFlow } from './view/entryFlow';
 import type { EntryFlowHandle } from './view/entryFlow';
 import { createOrderReview } from './view/orderReview';
 import type { OrderReviewHandle } from './view/orderReview';
+import { createSeamDesignPanel } from './view/seamDesignPanel';
+import type { SeamDesignPanelHandle } from './view/seamDesignPanel';
 import { createViewport } from './view/viewport';
 import type { Viewport } from './view/viewport';
 
@@ -251,7 +254,11 @@ export function mountApp(root: HTMLElement): void {
   piecesSection.className = 'panel-section';
   const fabricSection = document.createElement('section');
   fabricSection.className = 'fabric-panel';
-  panel.append(measurementsSection, piecesSection, fabricSection);
+  // UX-12: per-seam stitch/thread pickers live here in assembly mode only.
+  const seamDesignSection = document.createElement('section');
+  seamDesignSection.className = 'panel-section';
+  seamDesignSection.hidden = true;
+  panel.append(measurementsSection, piecesSection, fabricSection, seamDesignSection);
   layout.append(canvasHolder, panel);
 
   const status = document.createElement('div');
@@ -284,6 +291,7 @@ export function mountApp(root: HTMLElement): void {
   let panelHandle: PanelHandle | null = null;
   let legendHandle: MaterialsLegendHandle | null = null;
   let fabricHandle: { dispose(): void } | null = null;
+  let seamDesignHandle: SeamDesignPanelHandle | null = null;
   let measurementsHandle: MeasurementsPanelHandle | null = null;
   let unsubscribe: (() => void) | null = null;
   let assembleButton: HTMLButtonElement | null = null;
@@ -429,6 +437,10 @@ export function mountApp(root: HTMLElement): void {
     assemblyControls = null;
     assemblyView?.dispose();
     assemblyView = null;
+    // UX-12: the pickers describe a walkthrough — they leave with it.
+    seamDesignHandle?.dispose();
+    seamDesignHandle = null;
+    seamDesignSection.hidden = true;
   }
 
   /**
@@ -467,7 +479,13 @@ export function mountApp(root: HTMLElement): void {
     assemblyControls = createAssemblyControls(canvasHolder, {
       labels,
       learnCard: starterLearnCard(state.project),
-      onScrub: (scrub) => assemblyView?.setScrub(scrub.stepIndex, scrub.t),
+      onScrub: (scrub) => {
+        assemblyView?.setScrub(scrub.stepIndex, scrub.t);
+        // UX-12: the pickers always target the active seam, reading the
+        // model's current step (the panel's own emission replaced it).
+        const activeStep = state.project.assembly[scrub.stepIndex];
+        if (activeStep) seamDesignHandle?.setStep(scrub.stepIndex, activeStep);
+      },
       onExit: exitAssemblyToMat,
       // UX-01 motion spec: fold duration per seam — curved seams get more
       // time. Reduced-motion gating lives in the controls; the camera's
@@ -479,6 +497,25 @@ export function mountApp(root: HTMLElement): void {
       onStepBegin: (stepIndex, forward) =>
         assemblyView?.preFrameSeam(stepIndex, forward),
     });
+    // UX-12: seam design pickers for the active seam, mounted beside the
+    // fabric panel. Emissions are revalidated by createSeamStep inside the
+    // panel, then route through the applySeamDesign transition — the model
+    // stays the only writer, and the effect repaints the stitch layer.
+    const firstStep = assemblyView.plan.steps[0]?.step;
+    if (firstStep) {
+      seamDesignSection.hidden = false;
+      seamDesignHandle = createSeamDesignPanel(
+        seamDesignSection,
+        0,
+        firstStep,
+        {
+          onSeamDesignChange: (step) => {
+            const stepIndex = seamDesignHandle?.stepIndex ?? 0;
+            dispatch(applySeamDesign(state, stepIndex, step));
+          },
+        },
+      );
+    }
   }
 
   /**
@@ -746,6 +783,12 @@ export function mountApp(root: HTMLElement): void {
         else viewport?.applyFabric(spec);
         // The legend's swatches and summaries ride the same live swap.
         legendHandle?.updateFabric(spec);
+      },
+      onSeamDesignApplied: (stepIndex, step) => {
+        // UX-12: repaint the walkthrough's stitch layer from the new
+        // design. The mat rebuilds from the project on its next mount, so
+        // its placed pieces pick the design up when the user returns.
+        assemblyView?.applySeamDesign(stepIndex, step);
       },
     });
     // The entry surface follows the model: mount, mirror, or drop (UX-08) —

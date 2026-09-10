@@ -83,6 +83,8 @@ export interface AppStateEffects {
   readonly piecesRedrafted: readonly Piece[] | null;
   /** Fabric changed in place: re-skin the live scene. */
   readonly fabricApplied: FabricSpec | null;
+  /** UX-12: a seam's design changed in place: repaint the stitch layer. */
+  readonly seamDesignApplied: { stepIndex: number; step: SeamStep } | null;
 }
 
 export const NO_EFFECTS: AppStateEffects = {
@@ -91,6 +93,7 @@ export const NO_EFFECTS: AppStateEffects = {
   selection: null,
   piecesRedrafted: null,
   fabricApplied: null,
+  seamDesignApplied: null,
 };
 
 export function initialAppState(project: Project): AppState {
@@ -218,6 +221,31 @@ export function chooseEntryFabric(
   return {
     state: { ...state, entry: { step: 'project', fabric: spec } },
     effects: NO_EFFECTS,
+  };
+}
+
+/**
+ * UX-12: a seam's design (stitch, thread color) writes through to the
+ * project — the same in-place-update contract as applyFabric, so Save,
+ * Export, and Share see the picked design instead of silently reverting.
+ * The step arrives already validated and frozen by createSeamStep (the
+ * picker panel routes every emission through the factory); this transition
+ * only swaps it in at the named index and reports the repaint effect.
+ */
+export function applySeamDesign(
+  state: AppState,
+  stepIndex: number,
+  step: SeamStep,
+): TransitionResult {
+  if (state.project.assembly[stepIndex] === step) {
+    return { state, effects: NO_EFFECTS };
+  }
+  const assembly = state.project.assembly.map((existing, index) =>
+    index === stepIndex ? step : existing,
+  );
+  return {
+    state: { ...state, project: { ...state.project, assembly } },
+    effects: { ...NO_EFFECTS, seamDesignApplied: { stepIndex, step } },
   };
 }
 
@@ -462,6 +490,8 @@ export interface AppStateHandlers {
   onSelectionChanged(id: string | null): void;
   onPiecesRedrafted(pieces: readonly Piece[]): void;
   onFabricApplied(spec: FabricSpec): void;
+  /** UX-12: repaint the assembly view's stitch layer for one seam. */
+  onSeamDesignApplied(stepIndex: number, step: SeamStep): void;
 }
 
 /**
@@ -481,4 +511,10 @@ export function applyAppState(
   if (effects.selection) handlers.onSelectionChanged(effects.selection.id);
   if (effects.piecesRedrafted) handlers.onPiecesRedrafted(effects.piecesRedrafted);
   if (effects.fabricApplied) handlers.onFabricApplied(effects.fabricApplied);
+  if (effects.seamDesignApplied) {
+    handlers.onSeamDesignApplied(
+      effects.seamDesignApplied.stepIndex,
+      effects.seamDesignApplied.step,
+    );
+  }
 }
