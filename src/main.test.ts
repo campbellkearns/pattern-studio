@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountApp } from './app';
+import { curatedBlankProject } from './data/curatedBlank';
 import { STARTERS } from './data/starters';
 import { saveProject } from './io/projectIo';
 import { planShare } from './io/shareLink';
@@ -23,6 +24,23 @@ vi.mock('./view/viewport', () => ({
     applyPreset: () => {},
     refit: () => {},
     pieceScreenPositions: () => [],
+  }),
+}));
+
+// The assembly scene is faked at the same seam: the walkthrough's DOM bar is
+// real, but no WebGL runs in jsdom. The fake plan mirrors the project's real
+// assembly steps so the shell's labels and entry narration are exercised
+// with the data it would actually show.
+vi.mock('./view/assemblyView', () => ({
+  createAssemblyView: (options: {
+    project: { assembly: readonly unknown[] };
+  }) => ({
+    plan: { steps: options.project.assembly.map((step) => ({ step })) },
+    setScrub: () => {},
+    applyFabric: () => {},
+    preFrameSeam: () => {},
+    pieceScreenPositions: () => [],
+    dispose: () => {},
   }),
 }));
 
@@ -159,5 +177,84 @@ describe('entry flow (UX-08, jsdom mounts)', () => {
     entryButton('Curated blank').click();
     expect(entryFlow()).toBeNull();
     expect(statusText()).toContain('is on the mat with your fabric.');
+  });
+});
+
+describe('order review (UX-10, jsdom mounts)', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    document.body.innerHTML = '<div id="app"></div>';
+    window.localStorage.clear();
+    window.location.hash = '';
+    webglState.available = true;
+  });
+
+  const orderReview = (): HTMLElement | null =>
+    document.querySelector<HTMLElement>('.order-review');
+
+  const reviewButton = (label: string): HTMLButtonElement => {
+    const button = [
+      ...(orderReview()?.querySelectorAll<HTMLButtonElement>('button') ?? []),
+    ].find((b) => b.textContent === label);
+    if (!button) throw new Error(`review button not found: ${label}`);
+    return button;
+  };
+
+  it('Assemble opens the order review; Start stitching enters the walkthrough', () => {
+    const project = STARTERS[0].build();
+    saveProject(window.localStorage, project);
+    mountApp(root());
+    expect(orderReview()).toBeNull(); // returning user: mat first
+    toolbarButton('Assemble').click();
+    // The review holds the stage and narrates what is ahead.
+    expect(orderReview()).not.toBeNull();
+    expect(statusText()).toContain(`Stitching order for '${project.name}'`);
+    // The rows are the starter's assembly, in build order.
+    const rows = [
+      ...document.querySelectorAll<HTMLElement>('.order-review-step'),
+    ];
+    expect(rows).toHaveLength(project.assembly.length);
+    expect(
+      rows[0]!.textContent.replace(/ⓘ/g, '').replace(/\s{2,}/g, ' ')
+    ).toBe(
+      `${project.assembly[0]!.order} · ${project.assembly[0]!.name} — ${project.assembly[0]!.note}`,
+    );
+    // Start stitching dispatches the existing assembly entry path.
+    reviewButton('Start stitching').click();
+    expect(orderReview()).toBeNull();
+    expect(statusText()).toContain('Assembly —');
+  });
+
+  it('the review Back action returns to the mat and narrates it', () => {
+    saveProject(window.localStorage, STARTERS[0].build());
+    mountApp(root());
+    toolbarButton('Assemble').click();
+    expect(orderReview()).not.toBeNull();
+    reviewButton('← Back to the mat').click();
+    expect(orderReview()).toBeNull();
+    expect(statusText()).toContain('Back on the cutting mat.');
+    // The walkthrough did not start: no assembly narration happened.
+    expect(statusText()).not.toContain('Assembly —');
+  });
+
+  it('a project with no assembly gets the narrated empty review, no Start', () => {
+    const project = curatedBlankProject();
+    saveProject(window.localStorage, project);
+    mountApp(root());
+    toolbarButton('Assemble').click();
+    expect(orderReview()).not.toBeNull();
+    const empty = document.querySelector<HTMLElement>('.order-review-empty');
+    expect(empty?.textContent).toContain(
+      `'${project.name}' has no seams yet`,
+    );
+    const start = [
+      ...(orderReview()?.querySelectorAll<HTMLButtonElement>('button') ?? []),
+    ].find((button) => button.textContent === 'Start stitching');
+    expect(start?.hidden).toBe(true);
+    // The status bar narrates through the glossary, so strip the chip glyph
+    // (and its spacing) before matching the copy.
+    expect(
+      statusText().replace(/ⓘ/g, '').replace(/\s{2,}/g, ' ')
+    ).toContain('has no seams yet');
   });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Vector3 } from 'three';
+import { orderReviewRows } from '../appState';
 import { createStarterProject } from '../model';
 import type { PathCmd, StarterProject } from '../model';
 import { evaluateAssemblyPose, planAssembly } from '../engine/assembly';
@@ -175,6 +176,29 @@ describe('starter registry ladder', () => {
           expect.stringMatching(/\S/),
         );
       }
+    }
+  });
+
+  it('the UX-10 review list renders exactly project.assembly order for every starter', () => {
+    // The order-review surface's rows come from orderReviewRows — the same
+    // pure builder the shell renders. For every registry entry (the coaster
+    // included when UX-11 lands) the list must be the assembly, verbatim and
+    // in build order: what the user reviews is what the walkthrough folds.
+    for (const entry of STARTERS) {
+      const project = entry.build();
+      const rows = orderReviewRows(project);
+      expect(rows).toHaveLength(project.assembly.length);
+      project.assembly.forEach((step, i) => {
+        expect(rows[i]!.order).toBe(step.order);
+        expect(rows[i]!.title).toBe(step.name);
+        expect(rows[i]!.note).toBe(step.note);
+      });
+      // A starter with seams reviews a list it can then stitch; the order
+      // field is strictly increasing (validated by the model) so the review
+      // reads 1, 2, 3… without re-sorting.
+      expect(rows.map((row) => row.order)).toEqual(
+        [...rows.map((row) => row.order)].sort((a, b) => a - b),
+      );
     }
   });
 
