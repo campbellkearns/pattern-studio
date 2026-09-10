@@ -33,8 +33,12 @@ import type { FabricSpec, Piece, Project, SeamStep } from './model';
 import { curatedBlankProject, CURATED_BLANK_ID } from './data/curatedBlank';
 import { starterById } from './data/starters';
 
-/** Which scene currently owns the canvas. 'entry' (UX-08) is the fabric-first setup flow — no scene, DOM only. */
-export type AppMode = 'entry' | 'mat' | 'assembly';
+/**
+ * Which scene currently owns the canvas. 'entry' (UX-08) is the fabric-first
+ * setup flow and 'review' (UX-10) the order-review stage — both DOM-only,
+ * no scene mounted while they hold it.
+ */
+export type AppMode = 'entry' | 'review' | 'mat' | 'assembly';
 
 /**
  * The entry flow's substate (UX-08), present exactly while mode is 'entry'.
@@ -262,6 +266,75 @@ export function cancelEntry(state: AppState): TransitionResult {
 }
 
 /**
+ * UX-10 — the order-review stage's transitions. Like the entry flow, the
+ * review is a mode, not an overlay write: opening and leaving it are pure
+ * transitions riding the same five effect slots, so the shell keeps its one
+ * dispatch path. The review itself is stateless — it renders straight from
+ * `project.assembly` (orderReviewRows below), so there is no substate to
+ * carry and nothing to keep in sync.
+ */
+
+/**
+ * Open the order review from the mat: the Assemble action's first move
+ * (UX-10) — the walkthrough starts only after the order is reviewed.
+ * Idempotent when the review already holds the stage, and a no-op from the
+ * other modes: the entry flow and the walkthrough have their own paths.
+ */
+export function beginOrderReview(state: AppState): TransitionResult {
+  if (state.mode === 'review') return { state, effects: NO_EFFECTS };
+  if (state.mode !== 'mat') return { state, effects: NO_EFFECTS };
+  return {
+    state: { ...state, mode: 'review', selectedId: null, entry: null },
+    effects: {
+      ...NO_EFFECTS,
+      modeChanged: 'review',
+      selection: { id: null },
+    },
+  };
+}
+
+/** Leave the order review: back to the mat that was up before. */
+export function cancelOrderReview(state: AppState): TransitionResult {
+  if (state.mode !== 'review') return { state, effects: NO_EFFECTS };
+  return {
+    state: { ...state, mode: 'mat', entry: null },
+    effects: { ...NO_EFFECTS, modeChanged: 'mat' },
+  };
+}
+
+/** One reviewable row (UX-10): the seam's position, name, and learner note. */
+export interface OrderReviewRow {
+  /** Position in the build order, verbatim from the step. */
+  readonly order: number;
+  /**
+   * The seam's name — or, for projects predating the vocabulary layer
+   * (UX-07), the joined piece names, matching the walkthrough's fallback.
+   */
+  readonly title: string;
+  /** The learner "why", verbatim from the step. */
+  readonly note: string;
+}
+
+/**
+ * The review list (UX-10), read straight off `project.assembly`: the model
+ * validates strictly increasing `order` (project.ts), so array order is the
+ * build order — no re-sorting, and what the walkthrough will fold is exactly
+ * what this renders. Pure data: no planning, no WebGL — a project whose
+ * assembly cannot plan still reviews fine, and Start stitching (the existing
+ * assembly entry) is where planning errors narrate.
+ */
+export function orderReviewRows(project: Project): readonly OrderReviewRow[] {
+  const nameOf = (id: string): string =>
+    project.pieces.find((piece) => piece.id === id)?.name ?? id;
+  return project.assembly.map((step) => ({
+    order: step.order,
+    title:
+      step.name ?? `${nameOf(step.pieces[0])} → ${nameOf(step.pieces[1])}`,
+    note: step.note,
+  }));
+}
+
+/**
  * Entry-flow narration (UX-08): every step narrates on entry and exit —
  * the never-swallow discipline is the no-dead-ends guard. Pure builders,
  * interpolated at the call site (app.ts) so the copy audit covers their
@@ -346,6 +419,26 @@ export function assemblyEntryMessage(
   const seams = `${stepCount} seam${stepCount === 1 ? '' : 's'}`;
   const start = firstSeamName ? `, starting with the ${firstSeamName}` : '';
   return `Assembly — ${seams} to fold${start}. Scrub through them.`;
+}
+
+/**
+ * UX-10 order-review narration: names the project, the seam count, and the
+ * first seam up, then hands the decision over. Pure and interpolated at the
+ * call site (app.ts) so the copy audit covers its real shape.
+ */
+export function orderReviewMessage(
+  projectName: string,
+  seamCount: number,
+  firstSeamName?: string,
+): string {
+  const seams = `${seamCount} seam${seamCount === 1 ? '' : 's'}`;
+  const start = firstSeamName ? `, starting with the ${firstSeamName}` : '';
+  return `Stitching order for '${projectName}' — ${seams}${start}. Start stitching when you're ready.`;
+}
+
+/** UX-10 empty state (no assembly): narrate the why, keep the way back. */
+export function orderReviewEmptyMessage(projectName: string): string {
+  return `'${projectName}' has no seams yet — the stitching order appears once pieces are joined.`;
 }
 
 /**

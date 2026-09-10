@@ -12,8 +12,10 @@ import {
   applyFabric,
   assemblyEntryMessage,
   beginEntry,
+  beginOrderReview,
   cancelEntry,
   cancelEntryMessage,
+  cancelOrderReview,
   chooseEntryFabric,
   chooseEntryProject,
   enterAssembly,
@@ -25,12 +27,16 @@ import {
   initialEntryState,
   mirrorSelection,
   NOTHING_SELECTED_MESSAGE,
+  orderReviewEmptyMessage,
+  orderReviewMessage,
+  orderReviewRows,
   redraftPieces,
   selectPiece,
   statusText,
   switchProject,
 } from './appState';
-import { CURATED_BLANK_ID } from './data/curatedBlank';
+import { CURATED_BLANK_ID, curatedBlankProject } from './data/curatedBlank';
+import { createSeamStep } from './model';
 import type { AppState, AppStateHandlers, TransitionResult } from './appState';
 
 const buildStarter = (id: string): Project => {
@@ -412,5 +418,108 @@ describe('app state: selection mirroring', () => {
     expect(mirrored.selectedId).toBe(project.pieces[0]!.id);
     expect(mirrored.mode).toBe('mat');
     expect(mirrored.project).toBe(project);
+  });
+});
+
+describe('app state: order review (UX-10)', () => {
+  it('beginOrderReview opens the review stage from the mat, selection cleared', () => {
+    const project = notebook();
+    const base = initialAppState(project);
+    const selected = run(selectPiece(base, project.pieces[0]!.id));
+    const result = beginOrderReview(selected);
+    expect(result.state.mode).toBe('review');
+    expect(result.state.selectedId).toBeNull();
+    expect(result.state.entry).toBeNull();
+    expect(result.state.project).toBe(project);
+    expect(result.effects.modeChanged).toBe('review');
+    expect(result.effects.selection).toEqual({ id: null });
+  });
+
+  it('beginOrderReview is idempotent while the review holds the stage', () => {
+    const base = beginOrderReview(initialAppState(notebook())).state;
+    const result = beginOrderReview(base);
+    expect(result.state).toBe(base);
+    expect(result.effects.modeChanged).toBeNull();
+  });
+
+  it('beginOrderReview is a no-op from the entry flow and the walkthrough', () => {
+    const project = notebook();
+    const fromEntry = initialEntryState(project);
+    expect(beginOrderReview(fromEntry).state).toBe(fromEntry);
+    const fromAssembly = enterAssembly(initialAppState(project)).state;
+    expect(fromAssembly.mode).toBe('assembly');
+    expect(beginOrderReview(fromAssembly).state).toBe(fromAssembly);
+  });
+
+  it('cancelOrderReview returns to the mat; no-op outside the review', () => {
+    const base = beginOrderReview(initialAppState(notebook())).state;
+    const result = cancelOrderReview(base);
+    expect(result.state.mode).toBe('mat');
+    expect(result.state.entry).toBeNull();
+    expect(result.effects.modeChanged).toBe('mat');
+
+    const mat = initialAppState(notebook());
+    expect(cancelOrderReview(mat).state).toBe(mat);
+  });
+
+  it('Start stitching: the existing enterAssembly transition composes from review', () => {
+    const base = beginOrderReview(initialAppState(notebook())).state;
+    const result = enterAssembly(base);
+    expect(result.state.mode).toBe('assembly');
+    expect(result.state.selectedId).toBeNull();
+    expect(result.state.entry).toBeNull();
+    expect(result.effects.modeChanged).toBe('assembly');
+    expect(result.effects.selection).toEqual({ id: null });
+  });
+
+  it('opening the review applies mode change before selection, nothing else', () => {
+    const { calls, handlers } = recorder();
+    applyAppState(beginOrderReview(initialAppState(notebook())), handlers);
+    expect(calls).toEqual(['mode:review', 'select:none']);
+  });
+
+  it('orderReviewRows renders project.assembly order exactly', () => {
+    const project = notebook();
+    const rows = orderReviewRows(project);
+    expect(rows).toHaveLength(project.assembly.length);
+    project.assembly.forEach((step, i) => {
+      expect(rows[i]!.order).toBe(step.order);
+      // Every starter names its seams (UX-07): the title is the name.
+      expect(rows[i]!.title).toBe(step.name);
+      expect(rows[i]!.note).toBe(step.note);
+    });
+  });
+
+  it('orderReviewRows falls back to the joined piece names when a seam has none', () => {
+    const project = notebook();
+    const step = project.assembly[0]!;
+    const unnamed = createSeamStep({
+      pieces: step.pieces,
+      edges: step.edges,
+      order: step.order,
+      note: step.note,
+    });
+    const rows = orderReviewRows({ ...project, assembly: [unnamed] });
+    const nameOf = (id: string): string =>
+      project.pieces.find((piece) => piece.id === id)?.name ?? id;
+    expect(rows[0]!.title).toBe(
+      `${nameOf(step.pieces[0])} → ${nameOf(step.pieces[1])}`,
+    );
+  });
+
+  it('orderReviewRows is empty for a project with no assembly (curated blank)', () => {
+    expect(orderReviewRows(curatedBlankProject())).toEqual([]);
+  });
+
+  it('narrates the review opening and its empty state', () => {
+    expect(orderReviewMessage('Tote', 2, 'Side seams')).toBe(
+      `Stitching order for 'Tote' — 2 seams, starting with the Side seams. Start stitching when you're ready.`,
+    );
+    expect(orderReviewMessage('Coaster', 1)).toBe(
+      `Stitching order for 'Coaster' — 1 seam. Start stitching when you're ready.`,
+    );
+    expect(orderReviewEmptyMessage('Blank pattern')).toBe(
+      `'Blank pattern' has no seams yet — the stitching order appears once pieces are joined.`,
+    );
   });
 });
