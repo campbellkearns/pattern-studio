@@ -67,6 +67,7 @@ import {
   type WorldRectCm,
 } from './cameraFit';
 import { createSurfaceMeshes } from './surfaceMeshes';
+import { applyLinePoints } from './seamAccentGeometry';
 import { ROOM_FOG_FAR_CM, ROOM_FOG_NEAR_CM } from './matSurface';
 import {
   applyGrainlineUVs,
@@ -319,7 +320,14 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
     // its own plane; the line stays at SEAM_LIFT_CM above it.
     const chain2 = step.anchorChainWorld.map((p) => vec2(p.x, p.z));
     const glyph = stitchChainPoints(design.stitch, chain2);
-    seamLine.geometry.setFromPoints(glyph.map((p) => new Vector3(p.x, 0, p.y)));
+    // three's BufferGeometry.setFromPoints caps an existing position
+    // attribute at its previous length — resampled glyphs (35-point
+    // zigzags) would render as a 2-point stub. applyLinePoints swaps the
+    // attribute when the count changes so the full glyph lands.
+    applyLinePoints(
+      seamLine.geometry,
+      glyph.map((p) => new Vector3(p.x, 0, p.y)),
+    );
     const material = seamMaterials[design.stitch];
     material.color.set(design.threadColor ?? SCENE.seam);
     seamLine.material = material;
