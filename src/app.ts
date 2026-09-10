@@ -710,7 +710,9 @@ export function mountApp(root: HTMLElement): void {
       },
       onSelectionChanged: (id) => selection.select(id),
       onPiecesRedrafted: (pieces) => {
-        viewport?.updatePieces(pieces);
+        // UX-12: the fresh assembly rides along so seam stitch lines on
+        // placed pieces resolve against the redrafted chains.
+        viewport?.updatePieces(pieces, state.project.assembly);
         panelHandle?.updatePieces(pieces);
         legendHandle?.updatePieces(pieces);
         if (state.mode === 'assembly') {

@@ -21,6 +21,7 @@ import {
   HemisphereLight,
   Line,
   LineBasicMaterial,
+  LineDashedMaterial,
   LineSegments,
   MathUtils,
   Matrix4,
@@ -34,7 +35,8 @@ import {
   WebGLRenderer,
 } from 'three';
 import type { Box3 } from 'three';
-import type { FabricSpec, Project } from '../model';
+import type { FabricSpec, Project, SeamStep, StitchType } from '../model';
+import { vec2 } from '../model';
 import { SCENE } from '../tokens';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import {
@@ -43,6 +45,12 @@ import {
   planAssembly,
 } from '../engine/assembly';
 import type { AssemblyPlan } from '../engine/assembly';
+import {
+  BACKSTITCH_DASH_CM,
+  BACKSTITCH_GAP_CM,
+  DEFAULT_STITCH,
+  stitchChainPoints,
+} from './stitchGlyph';
 import { createFabricTextures, roughnessFor } from './fabricTexture';
 import {
   cameraDurationMs,
@@ -96,6 +104,12 @@ export interface AssemblyView {
   preFrameSeam(stepIndex: number, forward: boolean): void;
   /** Re-skin every piece with a new fabric spec, live. */
   applyFabric(spec: FabricSpec): void;
+  /**
+   * UX-12: a seam's design changed through the per-seam pickers (the step
+   * is the already-validated model object). Repaints the stitch layer when
+   * that seam is the active one.
+   */
+  applySeamDesign(stepIndex: number, step: SeamStep): void;
   /** Dev/dogfood aid: each piece's centre in client coordinates. */
   pieceScreenPositions(): Array<{ id: string; x: number; y: number }>;
   dispose(): void;
@@ -254,14 +268,36 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
   };
   applyAssemblyShadowFrustum();
 
-  // --- Current-seam highlight ---------------------------------------------
-  // The current seam: a seam check — the token's green, verbatim.
-  const seamMaterial = new LineBasicMaterial({ color: SCENE.seam });
-  const seamLine = new Line(new BufferGeometry(), seamMaterial);
+  // --- Current-seam stitch layer (UX-12) -----------------------------------
+  // The active seam's accent line: the stitch type picks the glyph (solid
+  // chain, resampled chevron, or long-dash material) and the thread color
+  // picks the tint — the design layer's fields, read from the seam step.
+  // The line rides SEAM_LIFT_CM; never polygonOffset (SwiftShader renders
+  // textured materials with polygonOffset at zero pixels — see viewport.ts).
+  const seamMaterials: Record<StitchType, LineBasicMaterial | LineDashedMaterial> =
+    {
+      straight: new LineBasicMaterial({ color: SCENE.seam }),
+      zigzag: new LineBasicMaterial({ color: SCENE.seam }),
+      backstitch: new LineDashedMaterial({
+        color: SCENE.seam,
+        dashSize: BACKSTITCH_DASH_CM,
+        gapSize: BACKSTITCH_GAP_CM,
+      }),
+    };
+  const seamLine = new Line(new BufferGeometry(), seamMaterials.straight);
   seamLine.visible = false;
   seamLine.position.y = SEAM_LIFT_CM;
   scene.add(seamLine);
-  disposables.push(seamMaterial, seamLine.geometry);
+  disposables.push(
+    ...Object.values(seamMaterials),
+    seamLine.geometry,
+  );
+
+  /** Live design per step, seeded from the project, updated by the pickers. */
+  const seamDesigns = plan.steps.map((stepPlan) => ({
+    stitch: stepPlan.step.stitch ?? DEFAULT_STITCH,
+    threadColor: stepPlan.step.threadColor,
+  }));
 
   let currentStepIndex = -1;
 
@@ -273,10 +309,37 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
       seamLine.visible = false;
       return;
     }
-    // Rebuild the accent line along this seam's anchor chain (world cm).
-    const points = step.anchorChainWorld.map((p) => p.clone());
-    seamLine.geometry.setFromPoints(points);
+    const design = seamDesigns[stepIndex]!;
+    // The glyph samples the anchor chain (world cm, flat on the mat) in
+    // its own plane; the line stays at SEAM_LIFT_CM above it.
+    const chain2 = step.anchorChainWorld.map((p) => vec2(p.x, p.z));
+    const glyph = stitchChainPoints(design.stitch, chain2);
+    seamLine.geometry.setFromPoints(
+      glyph.map((p) => new Vector3(p.x, 0, p.y)),
+    );
+    const material = seamMaterials[design.stitch];
+    material.color.set(design.threadColor ?? SCENE.seam);
+    seamLine.material = material;
+    if (material instanceof LineDashedMaterial) {
+      seamLine.computeLineDistances();
+    }
     seamLine.visible = true;
+  };
+
+  /**
+   * UX-12: a seam's design changed (per-seam pickers write through the
+   * model). Already validated by createSeamStep — this only repaints.
+   */
+  const applySeamDesign = (stepIndex: number, step: SeamStep): void => {
+    const design = seamDesigns[stepIndex];
+    if (!design) return;
+    design.stitch = step.stitch ?? DEFAULT_STITCH;
+    design.threadColor = step.threadColor;
+    if (stepIndex === currentStepIndex) {
+      // showSeam dedupes on the step index; force the rebuild.
+      currentStepIndex = -1;
+      showSeam(stepIndex);
+    }
   };
 
   // --- Scrub application ----------------------------------------------------
@@ -455,6 +518,7 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
     setScrub,
     preFrameSeam,
     applyFabric,
+    applySeamDesign,
     pieceScreenPositions,
     dispose,
   };

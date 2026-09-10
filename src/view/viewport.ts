@@ -10,13 +10,16 @@
  * covered by dogfood evidence, the pure logic around it by unit tests.
  */
 import {
+  BufferGeometry,
   Color,
   DirectionalLight,
   EdgesGeometry,
   Fog,
   Group,
   HemisphereLight,
+  Line,
   LineBasicMaterial,
+  LineDashedMaterial,
   LineSegments,
   Mesh,
   MeshPhysicalMaterial,
@@ -30,8 +33,15 @@ import {
   WebGLRenderer,
 } from 'three';
 import { SCENE } from '../tokens';
-import type { FabricSpec, Piece, Project } from '../model';
+import type { FabricSpec, Piece, Project, SeamStep } from '../model';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { chainPolyline } from '../engine/assembly';
+import {
+  BACKSTITCH_DASH_CM,
+  BACKSTITCH_GAP_CM,
+  DEFAULT_STITCH,
+  stitchChainPoints,
+} from './stitchGlyph';
 import { createFabricTextures, roughnessFor } from './fabricTexture';
 import { layoutOnMat, placementToWorld } from './layout';
 import {
@@ -77,7 +87,7 @@ export interface Viewport {
   /** Re-skin every piece with a new fabric spec, live. */
   applyFabric(spec: FabricSpec): void;
   /** Replace the rendered pieces (parametric redraft); layout recomputes. */
-  updatePieces(pieces: readonly Piece[]): void;
+  updatePieces(pieces: readonly Piece[], assembly?: readonly SeamStep[]): void;
   /**
    * Animate the camera back to the fitted work bounds — the tap equivalent
    * of the F shortcut. Always obeys: refit is the user's explicit hand.
@@ -96,6 +106,8 @@ export interface Viewport {
 
 /** Lift pieces off the mat to avoid z-fighting with the grid. */
 const PIECE_LIFT_CM = 0.06;
+/** UX-12 stitch lines ride just above the piece surface, above the marks. */
+const SEAM_STITCH_LIFT_CM = 0.1;
 /** Marks hover slightly above their piece's surface. */
 const MARKS_LIFT_CM = 0.04;
 /** Max pointer travel (px) between down and up that still counts as a tap. */
@@ -169,6 +181,10 @@ export function createViewport(options: ViewportOptions): Viewport {
   // project's original one. Project.fabric is readonly by design.
   let currentFabric: FabricSpec = project.fabric;
   const fabricTextures = createFabricTextures(currentFabric);
+  // UX-12: the assembly whose seams render on placed pieces. Redrafts pass
+  // the fresh assembly through updatePieces; chains resolve against the
+  // live piece geometry each rebuild.
+  let currentAssembly: readonly SeamStep[] = project.assembly;
 
   const sharedDisposables: { dispose(): void }[] = [surfaces, fabricTextures];
   let pieceDisposables: { dispose(): void }[] = [];
@@ -272,6 +288,50 @@ export function createViewport(options: ViewportOptions): Viewport {
       );
       marks.position.y = MARKS_LIFT_CM;
 
+      // --- UX-12 stitch layer -----------------------------------------
+      // Every assembly step joining this piece draws its stitch glyph along
+      // the piece-local edge chain, tinted by the step's thread color when
+      // present. Lines are children of the piece's group, so they ride the
+      // same placement and lift as the piece — never polygonOffset (the
+      // SwiftShader zero-pixel bug noted on the material above).
+      const stitchLines: Line[] = [];
+      for (let stepIndex = 0; stepIndex < currentAssembly.length; stepIndex++) {
+        const step = currentAssembly[stepIndex];
+        if (!step) continue;
+        // Which side of the seam runs along this piece (null: neither).
+        const side: 0 | 1 | null =
+          step.pieces[0] === piece.id
+            ? 0
+            : step.pieces[1] === piece.id
+              ? 1
+              : null;
+        if (side === null) continue;
+        const chain = chainPolyline(piece, step.edges[side]);
+        const glyph = stitchChainPoints(step.stitch ?? DEFAULT_STITCH, chain);
+        const seamGeometry = new BufferGeometry().setFromPoints(
+          glyph.map((p) => new Vector3(p.x, p.y, 0)),
+        );
+        // Same placement pipeline as the outline: bbox min-corner to the
+        // origin, then lay flat (XY → XZ).
+        seamGeometry.translate(-extents.minX, -extents.minY, 0);
+        seamGeometry.rotateX(-Math.PI / 2);
+        const seamMaterial: LineBasicMaterial | LineDashedMaterial =
+          step.stitch === 'backstitch'
+            ? new LineDashedMaterial({
+                color: step.threadColor ?? SCENE.seam,
+                dashSize: BACKSTITCH_DASH_CM,
+                gapSize: BACKSTITCH_GAP_CM,
+              })
+            : new LineBasicMaterial({ color: step.threadColor ?? SCENE.seam });
+        const seam = new Line(seamGeometry, seamMaterial);
+        seam.position.y = SEAM_STITCH_LIFT_CM;
+        if (seamMaterial instanceof LineDashedMaterial) {
+          seam.computeLineDistances();
+        }
+        stitchLines.push(seam);
+        pieceDisposables.push(seamGeometry, seamMaterial);
+      }
+
       const group = new Group();
       const placement = placementById.get(piece.id);
       if (!placement) throw new Error(`no layout for piece ${piece.id}`);
@@ -284,7 +344,7 @@ export function createViewport(options: ViewportOptions): Viewport {
         surfaceHeightCm(placement.surface) + PIECE_LIFT_CM,
         world.zCm,
       );
-      group.add(mesh, baseOutline, highlight, marks);
+      group.add(mesh, baseOutline, highlight, marks, ...stitchLines);
       piecesGroup.add(group);
 
       views.push({ id: piece.id, group, mesh, material, highlight });
@@ -303,7 +363,11 @@ export function createViewport(options: ViewportOptions): Viewport {
 
   buildPieceViews(project.pieces);
 
-  const updatePieces = (pieces: readonly Piece[]): void => {
+  const updatePieces = (
+    pieces: readonly Piece[],
+    assembly?: readonly SeamStep[],
+  ): void => {
+    if (assembly) currentAssembly = assembly;
     clearPieceViews();
     buildPieceViews(pieces);
     // A redrafted piece set can drop ids the selection/hover still name.
