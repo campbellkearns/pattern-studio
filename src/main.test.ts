@@ -215,7 +215,10 @@ describe('order review (UX-10, jsdom mounts)', () => {
     ];
     expect(rows).toHaveLength(project.assembly.length);
     expect(
-      rows[0]!.textContent.replace(/ⓘ/g, '').replace(/\s{2,}/g, ' ')
+      rows[0]!.textContent
+        .replace(/ⓘ/g, '')
+        .replace(/\s+([,.:;!?])/g, '$1')
+        .replace(/\s{2,}/g, ' '),
     ).toBe(
       `${project.assembly[0]!.order} · ${project.assembly[0]!.name} — ${project.assembly[0]!.note}`,
     );
@@ -254,7 +257,10 @@ describe('order review (UX-10, jsdom mounts)', () => {
     // The status bar narrates through the glossary, so strip the chip glyph
     // (and its spacing) before matching the copy.
     expect(
-      statusText().replace(/ⓘ/g, '').replace(/\s{2,}/g, ' ')
+      statusText()
+        .replace(/ⓘ/g, '')
+        .replace(/\s+([,.:;!?])/g, '$1')
+        .replace(/\s{2,}/g, ' ')
     ).toContain('has no seams yet');
   });
 });
