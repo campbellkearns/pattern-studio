@@ -83,6 +83,8 @@ export interface AppStateEffects {
   readonly piecesRedrafted: readonly Piece[] | null;
   /** Fabric changed in place: re-skin the live scene. */
   readonly fabricApplied: FabricSpec | null;
+  /** UX-12: a seam's design changed in place: repaint the stitch layer. */
+  readonly seamDesignApplied: { stepIndex: number; step: SeamStep } | null;
 }
 
 export const NO_EFFECTS: AppStateEffects = {
@@ -91,6 +93,7 @@ export const NO_EFFECTS: AppStateEffects = {
   selection: null,
   piecesRedrafted: null,
   fabricApplied: null,
+  seamDesignApplied: null,
 };
 
 export function initialAppState(project: Project): AppState {
@@ -104,11 +107,19 @@ export function initialAppState(project: Project): AppState {
  * the table" fallback should the user cancel the flow.
  */
 export function initialEntryState(project: Project): AppState {
-  return { project, mode: 'entry', selectedId: null, entry: { step: 'fabric' } };
+  return {
+    project,
+    mode: 'entry',
+    selectedId: null,
+    entry: { step: 'fabric' },
+  };
 }
 
 /** Mat-surface taps and panel clicks land here through the selection proxy. */
-export function selectPiece(state: AppState, id: string | null): TransitionResult {
+export function selectPiece(
+  state: AppState,
+  id: string | null,
+): TransitionResult {
   if (state.mode !== 'mat') return { state, effects: NO_EFFECTS };
   const selectedId =
     id !== null && state.project.pieces.some((piece) => piece.id === id)
@@ -144,7 +155,10 @@ export function exitAssembly(state: AppState): TransitionResult {
 }
 
 /** Starter switch, Load, Import JSON, and shared links all land here. */
-export function switchProject(state: AppState, project: Project): TransitionResult {
+export function switchProject(
+  state: AppState,
+  project: Project,
+): TransitionResult {
   return {
     state: { project, mode: 'mat', selectedId: null, entry: null },
     effects: {
@@ -161,7 +175,10 @@ export function switchProject(state: AppState, project: Project): TransitionResu
  * later remount (or Save/Export/Share) sees the same fabric instead of
  * silently reverting to the one the project was mounted with.
  */
-export function applyFabric(state: AppState, spec: FabricSpec): TransitionResult {
+export function applyFabric(
+  state: AppState,
+  spec: FabricSpec,
+): TransitionResult {
   if (state.project.fabric === spec) return { state, effects: NO_EFFECTS };
   return {
     state: { ...state, project: { ...state.project, fabric: spec } },
@@ -222,6 +239,31 @@ export function chooseEntryFabric(
 }
 
 /**
+ * UX-12: a seam's design (stitch, thread color) writes through to the
+ * project — the same in-place-update contract as applyFabric, so Save,
+ * Export, and Share see the picked design instead of silently reverting.
+ * The step arrives already validated and frozen by createSeamStep (the
+ * picker panel routes every emission through the factory); this transition
+ * only swaps it in at the named index and reports the repaint effect.
+ */
+export function applySeamDesign(
+  state: AppState,
+  stepIndex: number,
+  step: SeamStep,
+): TransitionResult {
+  if (state.project.assembly[stepIndex] === step) {
+    return { state, effects: NO_EFFECTS };
+  }
+  const assembly = state.project.assembly.map((existing, index) =>
+    index === stepIndex ? step : existing,
+  );
+  return {
+    state: { ...state, project: { ...state.project, assembly } },
+    effects: { ...NO_EFFECTS, seamDesignApplied: { stepIndex, step } },
+  };
+}
+
+/**
  * Land on the mat with the chosen project and the entry fabric applied
  * (the user's fabric choice wins over the starter's curated one). Unknown
  * ids are a no-op rather than a crash: the view only emits ids this module
@@ -237,9 +279,7 @@ export function chooseEntryProject(
     return { state, effects: NO_EFFECTS };
   }
   const built =
-    id === CURATED_BLANK_ID
-      ? curatedBlankProject()
-      : starterById(id)?.build();
+    id === CURATED_BLANK_ID ? curatedBlankProject() : starterById(id)?.build();
   if (built === undefined) return { state, effects: NO_EFFECTS };
   const project: Project =
     state.entry.fabric !== undefined
@@ -462,6 +502,8 @@ export interface AppStateHandlers {
   onSelectionChanged(id: string | null): void;
   onPiecesRedrafted(pieces: readonly Piece[]): void;
   onFabricApplied(spec: FabricSpec): void;
+  /** UX-12: repaint the assembly view's stitch layer for one seam. */
+  onSeamDesignApplied(stepIndex: number, step: SeamStep): void;
 }
 
 /**
@@ -476,9 +518,17 @@ export function applyAppState(
   handlers: AppStateHandlers,
 ): void {
   const { effects } = result;
-  if (effects.projectReplaced) handlers.onProjectReplaced(effects.projectReplaced);
+  if (effects.projectReplaced)
+    handlers.onProjectReplaced(effects.projectReplaced);
   if (effects.modeChanged) handlers.onModeChanged(effects.modeChanged);
   if (effects.selection) handlers.onSelectionChanged(effects.selection.id);
-  if (effects.piecesRedrafted) handlers.onPiecesRedrafted(effects.piecesRedrafted);
+  if (effects.piecesRedrafted)
+    handlers.onPiecesRedrafted(effects.piecesRedrafted);
   if (effects.fabricApplied) handlers.onFabricApplied(effects.fabricApplied);
+  if (effects.seamDesignApplied) {
+    handlers.onSeamDesignApplied(
+      effects.seamDesignApplied.stepIndex,
+      effects.seamDesignApplied.step,
+    );
+  }
 }

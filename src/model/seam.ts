@@ -13,6 +13,12 @@ import {
   requireNonNegativeInteger,
   requirePositiveInteger,
 } from './assert';
+import { requireHexColor } from './fabric';
+
+/** The curated stitch set (UX-12): the three seams a beginner meets first. */
+export const STITCH_TYPES = ['straight', 'zigzag', 'backstitch'] as const;
+
+export type StitchType = (typeof STITCH_TYPES)[number];
 
 /** A run of edges along a piece outline: edges startVertex … startVertex + edgeCount - 1. */
 export interface EdgeChain {
@@ -50,6 +56,20 @@ export interface SeamStep {
    * omitted means the default gate, so authoring mistakes still fail loudly.
    */
   readonly ease?: number;
+  /**
+   * UX-12 design layer: the stitch this seam is sewn with, shown as the
+   * seam line's glyph (straight solid, zigzag chevron, backstitch long-
+   * dash). Optional and validated only when present — projects predating
+   * the design layer omit it, and the engine never reads it.
+   */
+  readonly stitch?: StitchType;
+  /**
+   * UX-12 design layer: the thread color as a hex string (`#rgb` or
+   * `#rrggbb` — the same rule as a FabricSpec color), painted on the
+   * seam's accent line. Optional; omitted means the default seam check
+   * color. Purely decorative — the engine never reads it.
+   */
+  readonly threadColor?: string;
 }
 
 export function createEdgeChain(input: EdgeChain): EdgeChain {
@@ -92,11 +112,24 @@ export function createSeamStep(input: SeamStep): SeamStep {
       input.name === undefined
         ? undefined
         : requireNonEmptyString(input.name, 'seam name'),
-    ease:
-      input.ease === undefined
+    ease: input.ease === undefined ? undefined : requireEase(input.ease),
+    stitch:
+      input.stitch === undefined ? undefined : requireStitchType(input.stitch),
+    threadColor:
+      input.threadColor === undefined
         ? undefined
-        : requireEase(input.ease),
+        : requireHexColor(input.threadColor, 'seam threadColor'),
   });
+}
+
+/** Only the curated set is accepted — a typo'd stitch fails loudly. */
+function requireStitchType(stitch: StitchType): StitchType {
+  if (!STITCH_TYPES.includes(stitch)) {
+    throw new Error(
+      `seam stitch must be one of ${STITCH_TYPES.join(' | ')}, got "${String(stitch)}"`,
+    );
+  }
+  return stitch;
 }
 
 /** A declared ease is a fraction of the longer chain — strictly between 0 and 1. */

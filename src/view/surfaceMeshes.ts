@@ -134,7 +134,7 @@ export function createSurfaceMeshes(): SurfaceMeshes {
 
   // Dashed mat/paper boundary along the mat's far edge, per the figure.
   const boundaryMaterial = new LineDashedMaterial({
-    color: '#6e6759',
+    color: SCENE.boundary,
     dashSize: BOUNDARY_DASH_CM.dash,
     gapSize: BOUNDARY_DASH_CM.gap,
   });

@@ -7,9 +7,11 @@
 import { describe, expect, it } from 'vitest';
 import { STARTERS } from './data/starters';
 import type { FabricSpec, Piece, Project } from './model';
+import { createSeamStep } from './model/seam';
 import {
   applyAppState,
   applyFabric,
+  applySeamDesign,
   assemblyEntryMessage,
   beginEntry,
   beginOrderReview,
@@ -36,7 +38,6 @@ import {
   switchProject,
 } from './appState';
 import { CURATED_BLANK_ID, curatedBlankProject } from './data/curatedBlank';
-import { createSeamStep } from './model';
 import type { AppState, AppStateHandlers, TransitionResult } from './appState';
 
 const buildStarter = (id: string): Project => {
@@ -57,6 +58,8 @@ function recorder() {
     onSelectionChanged: (id) => calls.push(`select:${id ?? 'none'}`),
     onPiecesRedrafted: (pieces) => calls.push(`pieces:${pieces.length}`),
     onFabricApplied: (spec) => calls.push(`fabric:${spec.color}`),
+    onSeamDesignApplied: (stepIndex, step) =>
+      calls.push(`seamDesign:${stepIndex}:${step.stitch ?? 'none'}`),
   };
   return { calls, handlers };
 }
@@ -197,7 +200,9 @@ describe('app state: redraft linkage', () => {
     expect(kept.selectedId).toBe(firstId);
 
     const selectedLast = run(selectPiece(base, lastId));
-    const dropped = run(redraftPieces(selectedLast, dropPiece(project, lastId)));
+    const dropped = run(
+      redraftPieces(selectedLast, dropPiece(project, lastId)),
+    );
     // The regression: a redraft could drop the selected id and leave the
     // status bar narrating a piece no surface showed.
     expect(dropped.selectedId).toBeNull();
@@ -283,7 +288,9 @@ describe('app state: entry mode (UX-08)', () => {
 
   it('beginEntry leaves the mat for the fabric step and clears selection', () => {
     const project = notebook();
-    const base = run(selectPiece(initialAppState(project), project.pieces[0]!.id));
+    const base = run(
+      selectPiece(initialAppState(project), project.pieces[0]!.id),
+    );
     const result = beginEntry(base);
     expect(result.state.mode).toBe('entry');
     expect(result.state.entry).toEqual({ step: 'fabric' });
@@ -354,7 +361,9 @@ describe('app state: entry mode (UX-08)', () => {
 
   it('chooseEntryProject lands the curated blank with zero pieces', () => {
     const base = initialEntryState(notebook());
-    const atProject = run(chooseEntryFabric(base, fabricIn(notebook(), '#2468ac')));
+    const atProject = run(
+      chooseEntryFabric(base, fabricIn(notebook(), '#2468ac')),
+    );
     const result = chooseEntryProject(atProject, CURATED_BLANK_ID);
     expect(result.state.mode).toBe('mat');
     expect(result.state.project.id).toBe(CURATED_BLANK_ID);
@@ -389,7 +398,9 @@ describe('app state: entry mode (UX-08)', () => {
 
   it('landing applies project replacement before mode change before selection', () => {
     const base = initialEntryState(notebook());
-    const atProject = run(chooseEntryFabric(base, fabricIn(notebook(), '#2468ac')));
+    const atProject = run(
+      chooseEntryFabric(base, fabricIn(notebook(), '#2468ac')),
+    );
     const { calls, handlers } = recorder();
     applyAppState(chooseEntryProject(atProject, 'starter-tote'), handlers);
     expect(calls).toEqual(['project:starter-tote', 'mode:mat', 'select:none']);
@@ -521,5 +532,42 @@ describe('app state: order review (UX-10)', () => {
     expect(orderReviewEmptyMessage('Blank pattern')).toBe(
       `'Blank pattern' has no seams yet — the stitching order appears once pieces are joined.`,
     );
+  });
+});
+
+describe('app state: seam design writes through (UX-12)', () => {
+  it('swaps the designed step in at its index and reports the repaint', () => {
+    const project = notebook();
+    const base = initialAppState(project);
+    const original = project.assembly[0]!;
+    const designed = createSeamStep({
+      ...original,
+      stitch: 'zigzag',
+      threadColor: '#a4161a',
+    });
+    const result = applySeamDesign(base, 0, designed);
+    expect(result.state.project.assembly[0]).toBe(designed);
+    expect(result.state.project.assembly[1]).toBe(project.assembly[1]);
+    expect(result.effects.seamDesignApplied).toEqual({
+      stepIndex: 0,
+      step: designed,
+    });
+  });
+
+  it('no-ops when the step is already the live one', () => {
+    const project = notebook();
+    const base = initialAppState(project);
+    const step = project.assembly[0]!;
+    expect(applySeamDesign(base, 0, step)).toEqual({
+      state: base,
+      effects: {
+        projectReplaced: null,
+        modeChanged: null,
+        selection: null,
+        piecesRedrafted: null,
+        fabricApplied: null,
+        seamDesignApplied: null,
+      },
+    });
   });
 });
