@@ -60,12 +60,7 @@ describe('zigzagAlong', () => {
 
   it('tracks a curved chain without dividing by zero', () => {
     // A quarter-circle-ish chain: the arc-length sampler must follow it.
-    const curved = [
-      vec2(0, 0),
-      vec2(3, 4),
-      vec2(8, 6),
-      vec2(14, 6),
-    ];
+    const curved = [vec2(0, 0), vec2(3, 4), vec2(8, 6), vec2(14, 6)];
     const glyph = zigzagAlong(curved);
     expect(glyph[0]).toEqual(vec2(0, 0));
     expect(glyph[glyph.length - 1]).toEqual(vec2(14, 6));

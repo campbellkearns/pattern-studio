@@ -200,7 +200,9 @@ describe('app state: redraft linkage', () => {
     expect(kept.selectedId).toBe(firstId);
 
     const selectedLast = run(selectPiece(base, lastId));
-    const dropped = run(redraftPieces(selectedLast, dropPiece(project, lastId)));
+    const dropped = run(
+      redraftPieces(selectedLast, dropPiece(project, lastId)),
+    );
     // The regression: a redraft could drop the selected id and leave the
     // status bar narrating a piece no surface showed.
     expect(dropped.selectedId).toBeNull();
@@ -286,7 +288,9 @@ describe('app state: entry mode (UX-08)', () => {
 
   it('beginEntry leaves the mat for the fabric step and clears selection', () => {
     const project = notebook();
-    const base = run(selectPiece(initialAppState(project), project.pieces[0]!.id));
+    const base = run(
+      selectPiece(initialAppState(project), project.pieces[0]!.id),
+    );
     const result = beginEntry(base);
     expect(result.state.mode).toBe('entry');
     expect(result.state.entry).toEqual({ step: 'fabric' });
@@ -357,7 +361,9 @@ describe('app state: entry mode (UX-08)', () => {
 
   it('chooseEntryProject lands the curated blank with zero pieces', () => {
     const base = initialEntryState(notebook());
-    const atProject = run(chooseEntryFabric(base, fabricIn(notebook(), '#2468ac')));
+    const atProject = run(
+      chooseEntryFabric(base, fabricIn(notebook(), '#2468ac')),
+    );
     const result = chooseEntryProject(atProject, CURATED_BLANK_ID);
     expect(result.state.mode).toBe('mat');
     expect(result.state.project.id).toBe(CURATED_BLANK_ID);
@@ -392,7 +398,9 @@ describe('app state: entry mode (UX-08)', () => {
 
   it('landing applies project replacement before mode change before selection', () => {
     const base = initialEntryState(notebook());
-    const atProject = run(chooseEntryFabric(base, fabricIn(notebook(), '#2468ac')));
+    const atProject = run(
+      chooseEntryFabric(base, fabricIn(notebook(), '#2468ac')),
+    );
     const { calls, handlers } = recorder();
     applyAppState(chooseEntryProject(atProject, 'starter-tote'), handlers);
     expect(calls).toEqual(['project:starter-tote', 'mode:mat', 'select:none']);

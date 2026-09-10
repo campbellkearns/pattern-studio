@@ -258,7 +258,12 @@ export function mountApp(root: HTMLElement): void {
   const seamDesignSection = document.createElement('section');
   seamDesignSection.className = 'panel-section';
   seamDesignSection.hidden = true;
-  panel.append(measurementsSection, piecesSection, fabricSection, seamDesignSection);
+  panel.append(
+    measurementsSection,
+    piecesSection,
+    fabricSection,
+    seamDesignSection,
+  );
   layout.append(canvasHolder, panel);
 
   const status = document.createElement('div');
@@ -390,8 +395,9 @@ export function mountApp(root: HTMLElement): void {
             // the fresh draft; the pieces are the same set redraft
             // returns. Plain starters plan from the project's static
             // assembly as before.
-            const result =
-              entry?.redraftAssembly?.(values) ?? { pieces: redraft(values) };
+            const result = entry?.redraftAssembly?.(values) ?? {
+              pieces: redraft(values),
+            };
             // The redraft writes through the model, so Save/Export capture
             // what is on the mat and the live scene (either mode) follows.
             // A resolved assembly rides along — its chains are properties

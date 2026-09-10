@@ -107,9 +107,9 @@ describe('SeamStep stitch + thread color (UX-12)', () => {
   });
 
   it('accepts hex thread colors by the fabric rule (#rgb and #rrggbb)', () => {
-    expect(
-      createSeamStep(sideSeam({ threadColor: '#f0f' })).threadColor,
-    ).toBe('#f0f');
+    expect(createSeamStep(sideSeam({ threadColor: '#f0f' })).threadColor).toBe(
+      '#f0f',
+    );
     expect(
       createSeamStep(sideSeam({ threadColor: '#C0553B' })).threadColor,
     ).toBe('#C0553B');

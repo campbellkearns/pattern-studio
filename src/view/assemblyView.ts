@@ -156,10 +156,7 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
   let currentFabric: FabricSpec = project.fabric;
   const fabricTextures = createFabricTextures(currentFabric);
 
-  const disposables: { dispose(): void }[] = [
-    surfaces,
-    fabricTextures,
-  ];
+  const disposables: { dispose(): void }[] = [surfaces, fabricTextures];
   const pieceViews: AssemblyPieceView[] = [];
   const meshes: Mesh[] = [];
   /**
@@ -274,24 +271,23 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
   // picks the tint — the design layer's fields, read from the seam step.
   // The line rides SEAM_LIFT_CM; never polygonOffset (SwiftShader renders
   // textured materials with polygonOffset at zero pixels — see viewport.ts).
-  const seamMaterials: Record<StitchType, LineBasicMaterial | LineDashedMaterial> =
-    {
-      straight: new LineBasicMaterial({ color: SCENE.seam }),
-      zigzag: new LineBasicMaterial({ color: SCENE.seam }),
-      backstitch: new LineDashedMaterial({
-        color: SCENE.seam,
-        dashSize: BACKSTITCH_DASH_CM,
-        gapSize: BACKSTITCH_GAP_CM,
-      }),
-    };
+  const seamMaterials: Record<
+    StitchType,
+    LineBasicMaterial | LineDashedMaterial
+  > = {
+    straight: new LineBasicMaterial({ color: SCENE.seam }),
+    zigzag: new LineBasicMaterial({ color: SCENE.seam }),
+    backstitch: new LineDashedMaterial({
+      color: SCENE.seam,
+      dashSize: BACKSTITCH_DASH_CM,
+      gapSize: BACKSTITCH_GAP_CM,
+    }),
+  };
   const seamLine = new Line(new BufferGeometry(), seamMaterials.straight);
   seamLine.visible = false;
   seamLine.position.y = SEAM_LIFT_CM;
   scene.add(seamLine);
-  disposables.push(
-    ...Object.values(seamMaterials),
-    seamLine.geometry,
-  );
+  disposables.push(...Object.values(seamMaterials), seamLine.geometry);
 
   /** Live design per step, seeded from the project, updated by the pickers. */
   const seamDesigns = plan.steps.map((stepPlan) => ({
@@ -314,9 +310,7 @@ export function createAssemblyView(options: AssemblyViewOptions): AssemblyView {
     // its own plane; the line stays at SEAM_LIFT_CM above it.
     const chain2 = step.anchorChainWorld.map((p) => vec2(p.x, p.z));
     const glyph = stitchChainPoints(design.stitch, chain2);
-    seamLine.geometry.setFromPoints(
-      glyph.map((p) => new Vector3(p.x, 0, p.y)),
-    );
+    seamLine.geometry.setFromPoints(glyph.map((p) => new Vector3(p.x, 0, p.y)));
     const material = seamMaterials[design.stitch];
     material.color.set(design.threadColor ?? SCENE.seam);
     seamLine.material = material;

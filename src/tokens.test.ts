@@ -83,7 +83,10 @@ describe('five-token design system (UX-06)', () => {
     // The off-palette #6e6759 literal's last use was the dashed boundary;
     // guard against it creeping back into any view that paints colour.
     for (const file of ['surfaceMeshes.ts', 'assemblyView.ts', 'viewport.ts']) {
-      const source = readFileSync(join(process.cwd(), 'src/view', file), 'utf8');
+      const source = readFileSync(
+        join(process.cwd(), 'src/view', file),
+        'utf8',
+      );
       expect(source).not.toContain('#6e6759');
     }
   });

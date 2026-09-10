@@ -112,14 +112,9 @@ export function createSeamStep(input: SeamStep): SeamStep {
       input.name === undefined
         ? undefined
         : requireNonEmptyString(input.name, 'seam name'),
-    ease:
-      input.ease === undefined
-        ? undefined
-        : requireEase(input.ease),
+    ease: input.ease === undefined ? undefined : requireEase(input.ease),
     stitch:
-      input.stitch === undefined
-        ? undefined
-        : requireStitchType(input.stitch),
+      input.stitch === undefined ? undefined : requireStitchType(input.stitch),
     threadColor:
       input.threadColor === undefined
         ? undefined
