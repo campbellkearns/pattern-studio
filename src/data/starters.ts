@@ -7,6 +7,8 @@
  * measurements panel renders exactly the active starter's schema.
  *
  * Parameters/redraft semantics per entry:
+ * - Coaster: rung 0 — the first project. Two squares, one straight seam;
+ *   fixed-size like the other hand-authored rungs.
  * - Pants: the full pants set — adapter legs plus the measurement-sized
  *   auxiliaries; its eight declared parameters redraft everything live.
  * - Notebook holder / Toiletry rollup / Tote: no adjustable parameters —
@@ -26,6 +28,7 @@ import type {
   StarterProject,
 } from '../model';
 import { PANTS_PARAMETERS, toPantMeasurements } from '../engine/titanSettings';
+import { COASTER_STARTER } from './coaster';
 import { NOTEBOOK_HOLDER_STARTER } from './notebookHolder';
 import { TOILETRY_ROLLUP_STARTER } from './toiletryRollup';
 import { TOTE_STARTER } from './tote';
@@ -58,6 +61,12 @@ export interface StarterEntry {
 }
 
 export const STARTERS: readonly StarterEntry[] = [
+  {
+    id: 'starter-coaster',
+    name: 'Coaster',
+    build: () => createStarterProject(COASTER_STARTER),
+    parameters: EMPTY_PARAMETERS,
+  },
   {
     id: 'starter-notebook-holder',
     name: 'Notebook holder',
