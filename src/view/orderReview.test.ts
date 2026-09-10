@@ -13,9 +13,15 @@ import { createOrderReview } from './orderReview';
 
 const notebook = (): Project => STARTERS[0]!.build();
 
-/** Rendered text with the glossary chips' ⓘ affordance glyph removed. */
+/** Rendered text with the glossary chips flattened: the ⓘ affordance
+ * glyph goes, and a chip's trailing space is un-butted from punctuation
+ * ("together ⓘ ," → "together,") so assertions compare the copy itself. */
 const plainText = (element: HTMLElement | null): string =>
-  element?.textContent?.replace(/ⓘ/g, '').replace(/\s{2,}/g, ' ').trim() ?? '';
+  element?.textContent
+    ?.replace(/ⓘ/g, '')
+    .replace(/\s+([,.:;!?])/g, '$1')
+    .replace(/\s{2,}/g, ' ')
+    .trim() ?? '';
 
 describe('order review surface (UX-10, jsdom mounts)', () => {
   beforeEach(() => {

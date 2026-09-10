@@ -6,11 +6,12 @@ import type { PathCmd, StarterProject } from '../model';
 import { evaluateAssemblyPose, planAssembly } from '../engine/assembly';
 import { TITAN_PANTS_TEMPLATE } from '../engine/titanSettings';
 import { STARTERS, starterById } from './starters';
+import { COASTER_STARTER } from './coaster';
 import { TOILETRY_ROLLUP_STARTER } from './toiletryRollup';
 import { TOTE_STARTER } from './tote';
 
 /**
- * Shared invariants for the two fixed-size starters (D5 ladder rungs 2–3):
+ * Shared invariants for the fixed-size starters (D5 ladder rungs 0 and 2–3):
  * data soundness, cut counts per the authored spec, seam steps that resolve
  * against real pieces, and an assembly the engine can fold end to end.
  */
@@ -61,6 +62,88 @@ function expectFixedSizeStarterInvariants(
     expect(poses.get(anchorId)!.toArray()).toEqual(anchorPose.toArray());
   }
 }
+
+describe('coaster starter (ladder rung 0)', () => {
+  it('meets the fixed-size starter invariants', () => {
+    expectFixedSizeStarterInvariants(COASTER_STARTER, {
+      'coaster-top': 1,
+      'coaster-back': 1,
+    });
+    expect(COASTER_STARTER.name).toBe('Coaster');
+    expect(COASTER_STARTER.pieces.map((p) => p.id)).toEqual([
+      'coaster-top',
+      'coaster-back',
+    ]);
+  });
+
+  it('is two 10 cm squares joined by exactly one named straight seam (UX-11)', () => {
+    const project = createStarterProject(COASTER_STARTER);
+    expect(project.pieces).toHaveLength(2);
+    expect(project.assembly).toHaveLength(1);
+
+    // Each piece is a closed 10 x 10 cm square, all-straight outline.
+    for (const piece of project.pieces) {
+      const xs: number[] = [];
+      const ys: number[] = [];
+      for (const cmd of piece.outline) {
+        expect(cmd.type === 'M' || cmd.type === 'L' || cmd.type === 'Z').toBe(
+          true,
+        );
+        if (cmd.type !== 'Z') {
+          xs.push(cmd.point.x);
+          ys.push(cmd.point.y);
+        }
+      }
+      expect(Math.min(...xs)).toBe(0);
+      expect(Math.max(...xs)).toBe(10);
+      expect(Math.min(...ys)).toBe(0);
+      expect(Math.max(...ys)).toBe(10);
+    }
+
+    // One step, order 1, named (UX-07) with a learner note — one straight
+    // 10 cm edge chain per side.
+    const step = project.assembly[0]!;
+    expect(step.order).toBe(1);
+    expect(step.name).toBe('Edge seam');
+    expect(step.note).toMatch(/\S/);
+    expect(step.pieces).toEqual(['coaster-top', 'coaster-back']);
+    expect(step.edges[0]).toEqual({
+      pieceId: 'coaster-top',
+      startVertex: 0,
+      edgeCount: 1,
+    });
+    expect(step.edges[1]).toEqual({
+      pieceId: 'coaster-back',
+      startVertex: 0,
+      edgeCount: 1,
+    });
+  });
+
+  it('walkthrough completes in one step: the top square folds onto the back', () => {
+    const project = createStarterProject(COASTER_STARTER);
+    const plan = planAssembly(project);
+    expect(plan.steps).toHaveLength(1);
+
+    const backPose = plan.basePoses.get('coaster-back')!;
+    const folded = evaluateAssemblyPose(plan, 0, 1);
+
+    // The anchor never moves; the mover lands exactly on it — two squares
+    // face to face, centres coincident.
+    expect(folded.get('coaster-back')!.toArray()).toEqual(
+      backPose.toArray(),
+    );
+    const topCentre = new Vector3(5, 5, 0).applyMatrix4(
+      folded.get('coaster-top')!,
+    );
+    const backCentre = new Vector3(5, 5, 0).applyMatrix4(backPose);
+    expect(topCentre.distanceTo(backCentre)).toBeCloseTo(0, 6);
+
+    // ...and the walkthrough really folds: the mover sweeps between the
+    // open-book flat pose and the folded one.
+    const flat = evaluateAssemblyPose(plan, 0, 0).get('coaster-top')!;
+    expect(flat.toArray()).not.toEqual(folded.get('coaster-top')!.toArray());
+  });
+});
 
 describe('toiletry rollup starter (ladder rung 2)', () => {
   it('meets the fixed-size starter invariants', () => {
@@ -145,6 +228,7 @@ describe('tote starter (ladder rung 3)', () => {
 describe('starter registry ladder', () => {
   it('orders the picker along the D5 difficulty ladder', () => {
     expect(STARTERS.map((entry) => entry.id)).toEqual([
+      'starter-coaster',
       'starter-notebook-holder',
       'starter-toiletry-rollup',
       'starter-tote',
